@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * STARS_PLUS TELEGRAM BOT - V3.2 (ENTERPRISE RESTRUCTURED)
+ * STARS_PLUS TELEGRAM BOT - V3.3 (ENTERPRISE RESTRUCTURED & COLOR KEYBOARD)
  * ============================================================================
  */
 
@@ -59,10 +59,10 @@ const DB_FILE = path.join(__dirname, 'database.json');
 const STAR_USD = 0.015;
 
 /**
- * Fallback price for USDT to Toman in case Nobitex API is unreachable.
+ * Fallback price for USDT to Toman in case Wallex API is unreachable.
  * @constant {number}
  */
-const FALLBACK_USDT_TOMAN = 311473; 
+const FALLBACK_USDT_TOMAN = 312482; 
 
 /**
  * Fallback price for TON to USD in case Binance API is unreachable.
@@ -202,7 +202,7 @@ function saveDatabase() {
 
 // Trigger initial load
 loadDatabase();
-SystemLogger.info('System', 'STARS_PLUS Bot is running with Live Nobitex & Binance APIs!');
+SystemLogger.info('System', 'STARS_PLUS Bot is running with Live Wallex & Binance APIs!');
 
 // ============================================================================
 // USER STATE MACHINE & DATA MANAGEMENT
@@ -412,35 +412,65 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (NOBITEX & BINANCE WITH 10% MARKUP)
+// FINANCIAL API INTEGRATIONS (WALLEX & BINANCE WITH 10% MARKUP)
 // ============================================================================
 
 async function getUsdtToToman() {
     return new Promise((resolve) => {
-        https.get('https://api.nobitex.ir/v2/orderbook/USDTIRT', { headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot' } }, (res) => {
+        https.get('https://api-docs.wallex.ir/v1/markets', { headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot' } }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
                 try {
                     const parsed = JSON.parse(data);
-                    if (parsed && parsed.status === 'ok' && parsed.lastTradePrice) {
-                        let price = parseFloat(parsed.lastTradePrice);
-                        if (price > 3000000) price = price / 10;
-                        resolve(price);
-                    } else if (parsed && parsed.bids && parsed.bids.length > 0) {
-                        let price = parseFloat(parsed.bids[0][0]);
+                    // Checking Wallex market structure for USDTIRT
+                    let price = null;
+                    if (parsed && parsed.result && parsed.result.symbols) {
+                        const usdtMarket = parsed.result.symbols['USDTIRT'] || parsed.result.symbols['USDTTMN'];
+                        if (usdtMarket && usdtMarket.stats && usdtMarket.stats.lastPrice) {
+                            price = parseFloat(usdtMarket.stats.lastPrice);
+                        }
+                    }
+                    if (!price && parsed && parsed.symbols && parsed.symbols['USDTIRT']) {
+                        price = parseFloat(parsed.symbols['USDTIRT'].stats.lastPrice);
+                    }
+                    if (price) {
                         if (price > 3000000) price = price / 10;
                         resolve(price);
                     } else {
-                        resolve(FALLBACK_USDT_TOMAN);
+                        // Fallback to secondary Wallex endpoint or general fallback
+                        fetchWallexAlt(resolve);
                     }
                 } catch (e) {
-                    resolve(FALLBACK_USDT_TOMAN);
+                    fetchWallexAlt(resolve);
                 }
             });
         }).on('error', () => {
-            resolve(FALLBACK_USDT_TOMAN);
+            fetchWallexAlt(resolve);
         });
+    });
+}
+
+function fetchWallexAlt(resolve) {
+    https.get('https://api.wallex.ir/v1/currencies/stats', { headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot' } }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+            try {
+                const parsed = JSON.parse(data);
+                if (parsed && parsed.result && parsed.result.USDT) {
+                    let price = parseFloat(parsed.result.USDT.price);
+                    if (price > 3000000) price = price / 10;
+                    resolve(price);
+                } else {
+                    resolve(FALLBACK_USDT_TOMAN);
+                }
+            } catch (e) {
+                resolve(FALLBACK_USDT_TOMAN);
+            }
+        });
+    }).on('error', () => {
+        resolve(FALLBACK_USDT_TOMAN);
     });
 }
 
@@ -484,18 +514,18 @@ async function fetchTonData() {
 }
 
 // ============================================================================
-// KEYBOARD GENERATOR FACTORIES (COLOR-CODED AS REQUESTED)
+// KEYBOARD GENERATOR FACTORIES (COLOR-CODED WITH TELEGRAM NATIVE COLOR API)
 // ============================================================================
 
 function getMainKeyboard(isAdmin) {
     let rows = [
-        [{ text: '🛒 خرید محصول 🟢' }],
-        [{ text: '➕ افزایش موجودی 🔵' }, { text: '💳 حساب کاربری 🔵' }],
-        [{ text: '📞 پشتیبانی 🔴' }, { text: '📦 پیگیری سفارش 🔵' }],
-        [{ text: '❤️ چطور میتوانم به شما اعتماد کنم 🔴' }]
+        [{ text: '🛒 خرید محصول 🟢', color: 'green' }],
+        [{ text: '➕ افزایش موجودی 🔵', color: 'blue' }, { text: '💳 حساب کاربری 🔵', color: 'blue' }],
+        [{ text: '📞 پشتیبانی 🔴', color: 'red' }, { text: '📦 پیگیری سفارش 🔵', color: 'blue' }],
+        [{ text: '❤️ چطور میتوانم به شما اعتماد کنم 🔴', color: 'red' }]
     ];
     if (isAdmin) {
-        rows.push([{ text: '🔧 پنل مدیریت 🔴' }]);
+        rows.push([{ text: '🔧 پنل مدیریت 🔴', color: 'red' }]);
     }
     return { reply_markup: { keyboard: rows, resize_keyboard: true, is_persistent: true } };
 }
@@ -504,10 +534,10 @@ function getShopKeyboard() {
     return {
         reply_markup: {
             keyboard: [
-                [{ text: '📦 سفارش های اخیر من 🔵' }],
-                [{ text: '⭐️ استارز 🟢' }, { text: '💠 خرید ارز تون 🟢' }],
-                [{ text: '🎁 گیفت استارزی 🟢' }],
-                [{ text: 'برگشت ↩️ 🔴' }]
+                [{ text: '📦 سفارش های اخیر من 🔵', color: 'blue' }],
+                [{ text: '⭐️ استارز 🟢', color: 'green' }, { text: '💠 خرید ارز تون 🟢', color: 'green' }],
+                [{ text: '🎁 گیفت استارزی 🟢', color: 'green' }],
+                [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
             ],
             resize_keyboard: true
         }
@@ -517,7 +547,7 @@ function getShopKeyboard() {
 function getBackKeyboard() {
     return {
         reply_markup: {
-            keyboard: [[{ text: 'برگشت ↩️ 🔴' }]],
+            keyboard: [[{ text: 'برگشت ↩️ 🔴', color: 'red' }]],
             resize_keyboard: true
         }
     };
@@ -527,8 +557,8 @@ function getAccountKeyboard() {
     return {
         reply_markup: {
             keyboard: [
-                [{ text: '📦 سفارش های معلق من 🔵' }, { text: '📦 سفارش های اخیر من 🔵' }],
-                [{ text: 'برگشت ↩️ 🔴' }]
+                [{ text: '📦 سفارش های معلق من 🔵', color: 'blue' }, { text: '📦 سفارش های اخیر من 🔵', color: 'blue' }],
+                [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
             ],
             resize_keyboard: true
         }
@@ -557,30 +587,20 @@ async function showStarInvoice(chatId, userData) {
     saveDatabase();
 
     const invoiceMsg = 
-        `<b>فاکتور خرید استارز (Stars Plus)</b>
-
-` +
-        `💫 مقدار خرید: ${userData.starCount}
-` +
-        `👤 یوزر دریافت‌کننده: @${escapeHTML(userData.starRecipient)}
-
-` +
-        `💰 مبلغ فاکتور: ${totalPrice.toLocaleString()} تومان
-` +
-        `🎁 کل موجودی تخفیف: ${availableDiscountWallet.toLocaleString()} تومان
-
-` +
-        `🩵 مبلغ نهایی: <b>${finalAmount.toLocaleString()} تومان</b>
-
-` +
+        `<b>فاکتور خرید استارز (Stars Plus)</b>\n\n` +
+        `💫 مقدار خرید: ${userData.starCount}\n` +
+        `👤 یوزر دریافت‌کننده: @${escapeHTML(userData.starRecipient)}\n\n` +
+        `💰 مبلغ فاکتور: ${totalPrice.toLocaleString()} تومان\n` +
+        `🎁 کل موجودی تخفیف: ${availableDiscountWallet.toLocaleString()} تومان\n\n` +
+        `🩵 مبلغ نهایی: <b>${finalAmount.toLocaleString()} تومان</b>\n\n` +
         `💼 در صورتی که جزئیات بالا مورد تأیید شماست ✓ روی دکمه تأیید کلیک کنید.`;
 
     const invoiceKeyboard = {
         reply_markup: {
             keyboard: [
-                [{ text: 'تأیید ✅ 🟢' }, { text: 'لغو خرید ❌ 🔴' }],
-                [{ text: 'اعمال تخفیف 🎁 🔵' }, { text: 'اعمال کد تخفیف 🎫 🔵' }],
-                [{ text: '🔙 بازگشت به پکیج‌ها 🔴' }, { text: '🏠 منوی اصلی 🔴' }]
+                [{ text: 'تأیید ✅ 🟢', color: 'green' }, { text: 'لغو خرید ❌ 🔴', color: 'red' }],
+                [{ text: 'اعمال تخفیف 🎁 🔵', color: 'blue' }, { text: 'اعمال کد تخفیف 🎫 🔵', color: 'blue' }],
+                [{ text: '🔙 بازگشت به پکیج‌ها 🔴', color: 'red' }, { text: '🏠 منوی اصلی 🔴', color: 'red' }]
             ],
             resize_keyboard: true
         }
@@ -608,33 +628,22 @@ async function showGiftInvoice(chatId, userData) {
     saveDatabase();
 
     const invoiceMsg = 
-        `<b>فاکتور خرید گیفت</b>
-
-` +
-        `مقدار خرید: ${escapeHTML(userData.selectedGiftName)} (${userData.selectedGiftStars} استارز)
-` +
-        `تعداد: ${userData.giftCount}
-` +
-        `یوزر دریافت‌کننده: @${escapeHTML(userData.recipientUsername)}
-
-` +
-        `گیفت هاید: ${userData.isHided ? 'بله' : 'خیر'}
-` +
-        `کامنت: ${escapeHTML(userData.commentText)}
-
-` +
-        `مبلغ نهایی: <b>${currentAmount.toLocaleString()} تومان</b>
-
-` +
+        `<b>فاکتور خرید گیفت</b>\n\n` +
+        `مقدار خرید: ${escapeHTML(userData.selectedGiftName)} (${userData.selectedGiftStars} استارز)\n` +
+        `تعداد: ${userData.giftCount}\n` +
+        `یوزر دریافت‌کننده: @${escapeHTML(userData.recipientUsername)}\n\n` +
+        `گیفت هاید: ${userData.isHided ? 'بله' : 'خیر'}\n` +
+        `کامنت: ${escapeHTML(userData.commentText)}\n\n` +
+        `مبلغ نهایی: <b>${currentAmount.toLocaleString()} تومان</b>\n\n` +
         `در صورتی که جزئیات بالا مورد تأیید شماست ، روی دکمه تایید کلیک کنید.`;
 
     const invoiceKeyboard = {
         reply_markup: {
             keyboard: [
-                [{ text: '✅ تایید 🟢' }, { text: 'لغو خرید ❌ 🔴' }],
-                [{ text: '💳 اعمال کد تخفیف 🔵' }],
-                [{ text: '💬 تنظیم کامنت 🔵' }, { text: userData.isHided ? '🔓 لغو هاید 🔴' : '🔒 هاید گیفت 🔵' }],
-                [{ text: 'برگشت ↩️ 🔴' }]
+                [{ text: '✅ تایید 🟢', color: 'green' }, { text: 'لغو خرید ❌ 🔴', color: 'red' }],
+                [{ text: '💳 اعمال کد تخفیف 🔵', color: 'blue' }],
+                [{ text: '💬 تنظیم کامنت 🔵', color: 'blue' }, { text: userData.isHided ? '🔓 لغو هاید 🔴' : '🔒 هاید گیفت 🔵', color: userData.isHided ? 'red' : 'blue' }],
+                [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
             ],
             resize_keyboard: true
         }
@@ -648,27 +657,19 @@ async function showTonInvoice(chatId, userData) {
     saveDatabase();
 
     const invoiceMsg = 
-        `<b>[ فاکتور خرید ارز تون ]</b>
-
-` +
-        `مقدار خرید: ${userData.tonAmount} تون
-` +
-        `آدرس ولت: <code>${escapeHTML(userData.tonWalletAddress)}</code>
-` +
-        `کامنت (مم): ${escapeHTML(userData.tonMemo)}
-
-` +
-        `مبلغ نهایی: <b>${totalPrice.toLocaleString()} تومان</b>
-
-` +
+        `<b>[ فاکتور خرید ارز تون ]</b>\n\n` +
+        `مقدار خرید: ${userData.tonAmount} تون\n` +
+        `آدرس ولت: <code>${escapeHTML(userData.tonWalletAddress)}</code>\n` +
+        `کامنت (مم): ${escapeHTML(userData.tonMemo)}\n\n` +
+        `مبلغ نهایی: <b>${totalPrice.toLocaleString()} تومان</b>\n\n` +
         `در صورتی که جزئیات بالا مورد تأیید شماست ، روی دکمه تایید کلیک کنید.`;
 
     const invoiceKeyboard = {
         reply_markup: {
             keyboard: [
-                [{ text: '✅ تایید تون 🟢' }, { text: 'لغو خرید ❌ 🔴' }],
-                [{ text: '💳 اعمال کد تخفیف 🔵' }],
-                [{ text: 'برگشت ↩️ 🔴' }]
+                [{ text: '✅ تایید تون 🟢', color: 'green' }, { text: 'لغو خرید ❌ 🔴', color: 'red' }],
+                [{ text: '💳 اعمال کد تخفیف 🔵', color: 'blue' }],
+                [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
             ],
             resize_keyboard: true
         }
@@ -776,8 +777,8 @@ bot.on('message', async (msg) => {
             const starMenuKeyboard = {
                 reply_markup: {
                     keyboard: [
-                        [{ text: 'محاسبه با موجودی من 🔄 🔵' }],
-                        [{ text: 'برگشت ↩️ 🔴' }]
+                        [{ text: 'محاسبه با موجودی من 🔄 🔵', color: 'blue' }],
+                        [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                     ],
                     resize_keyboard: true
                 }
@@ -868,9 +869,9 @@ bot.on('message', async (msg) => {
             const restrictionKeyboard = {
                 reply_markup: {
                     keyboard: [
-                        [{ text: '🌐 بدون محدودیت 🔵' }, { text: '⭐ محدودیت برای استارز 🔵' }],
-                        [{ text: '💠 محدودیت برای تون 🔵' }, { text: '🎁 محدودیت برای گیفت‌ها 🔵' }],
-                        [{ text: 'برگشت ↩️ 🔴' }]
+                        [{ text: '🌐 بدون محدودیت 🔵', color: 'blue' }, { text: '⭐ محدودیت برای استارز 🔵', color: 'blue' }],
+                        [{ text: '💠 محدودیت برای تون 🔵', color: 'blue' }, { text: '🎁 محدودیت برای گیفت‌ها 🔵', color: 'blue' }],
+                        [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                     ],
                     resize_keyboard: true
                 }
@@ -899,11 +900,11 @@ bot.on('message', async (msg) => {
             const adminPanelMarkup = {
                 reply_markup: {
                     keyboard: [
-                        [{ text: '➕ افزایش موجودی کاربر 🟢' }, { text: '➖ کاهش موجودی کاربر 🔴' }],
-                        [{ text: '🏆 تغییر سطح کاربر 🔵' }, { text: '💳 تایید احراز هویت کاربر 🟢' }],
-                        [{ text: '🚫 بن کردن کاربر 🔴' }, { text: '✅ آنبن کردن کاربر 🟢' }],
-                        [{ text: '🏷️ ساخت کد تخفیف 🔵' }, { text: '👑 تنظیم مالک دوم 🔵' }],
-                        [{ text: '🔙 بازگشت به منوی اصلی 🔴' }]
+                        [{ text: '➕ افزایش موجودی کاربر 🟢', color: 'green' }, { text: '➖ کاهش موجودی کاربر 🔴', color: 'red' }],
+                        [{ text: '🏆 تغییر سطح کاربر 🔵', color: 'blue' }, { text: '💳 تایید احراز هویت کاربر 🟢', color: 'green' }],
+                        [{ text: '🚫 بن کردن کاربر 🔴', color: 'red' }, { text: '✅ آنبن کردن کاربر 🟢', color: 'green' }],
+                        [{ text: '🏷️ ساخت کد تخفیف 🔵', color: 'blue' }, { text: '👑 تنظیم مالک دوم 🔵', color: 'blue' }],
+                        [{ text: '🔙 بازگشت به منوی اصلی 🔴', color: 'red' }]
                     ], 
                     resize_keyboard: true
                 }
@@ -1031,8 +1032,8 @@ bot.on('message', async (msg) => {
         const recipientKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: `برای خودم ( ${selfName} ) 🪪 🟢` }],
-                    [{ text: 'برگشت ↩️ 🔴' }]
+                    [{ text: `برای خودم ( ${selfName} ) 🪪 🟢`, color: 'green' }],
+                    [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                 ],
                 resize_keyboard: true
             }
@@ -1093,8 +1094,8 @@ bot.on('message', async (msg) => {
         const memoKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: '💬 بله، کامنت دارم 🔵' }, { text: '❌ رد کردن 🔴' }],
-                    [{ text: 'برگشت ↩️ 🔴' }]
+                    [{ text: '💬 بله، کامنت دارم 🔵', color: 'blue' }, { text: '❌ رد کردن 🔴', color: 'red' }],
+                    [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                 ],
                 resize_keyboard: true
             }
@@ -1458,11 +1459,11 @@ bot.on('message', async (msg) => {
         const adminPanelMarkup = {
             reply_markup: {
                 keyboard: [
-                    [{ text: '➕ افزایش موجودی کاربر 🟢' }, { text: '➖ کاهش موجودی کاربر 🔴' }],
-                    [{ text: '🏆 تغییر سطح کاربر 🔵' }, { text: '💳 تایید احراز هویت کاربر 🟢' }],
-                    [{ text: '🚫 بن کردن کاربر 🔴' }, { text: '✅ آنبن کردن کاربر 🟢' }],
-                    [{ text: '🏷️ ساخت کد تخفیف 🔵' }, { text: '👑 تنظیم مالک دوم 🔵' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی 🔴' }]
+                    [{ text: '➕ افزایش موجودی کاربر 🟢', color: 'green' }, { text: '➖ کاهش موجودی کاربر 🔴', color: 'red' }],
+                    [{ text: '🏆 تغییر سطح کاربر 🔵', color: 'blue' }, { text: '💳 تایید احراز هویت کاربر 🟢', color: 'green' }],
+                    [{ text: '🚫 بن کردن کاربر 🔴', color: 'red' }, { text: '✅ آنبن کردن کاربر 🟢', color: 'green' }],
+                    [{ text: '🏷️ ساخت کد تخفیف 🔵', color: 'blue' }, { text: '👑 تنظیم مالک دوم 🔵', color: 'blue' }],
+                    [{ text: '🔙 بازگشت به منوی اصلی 🔴', color: 'red' }]
                 ], resize_keyboard: true
             }
         };
@@ -1501,8 +1502,8 @@ bot.on('message', async (msg) => {
         const starMenuKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: 'محاسبه با موجودی من 🔄 🔵' }],
-                    [{ text: 'برگشت ↩️ 🔴' }]
+                    [{ text: 'محاسبه با موجودی من 🔄 🔵', color: 'blue' }],
+                    [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                 ],
                 resize_keyboard: true
             }
@@ -1519,8 +1520,8 @@ bot.on('message', async (msg) => {
         const tonWalletFlowKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: 'محاسبه با موجودی من 🔄 🔵' }],
-                    [{ text: 'برگشت ↩️ 🔴' }]
+                    [{ text: 'محاسبه با موجودی من 🔄 🔵', color: 'blue' }],
+                    [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                 ],
                 resize_keyboard: true
             }
@@ -1535,8 +1536,8 @@ bot.on('message', async (msg) => {
         const giftCategoryKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: '🧸 گیفت های عادی 🔵' }],
-                    [{ text: 'برگشت ↩️ 🔴' }]
+                    [{ text: '🧸 گیفت های عادی 🔵', color: 'blue' }],
+                    [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                 ],
                 resize_keyboard: true
             }
@@ -1549,12 +1550,12 @@ bot.on('message', async (msg) => {
         const giftListKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: '💖 گیفت قلب (15) 🔵' }, { text: '🧸 گیفت تدی (15) 🔵' }],
-                    [{ text: '🎁 گیفت کادو (25) 🔵' }, { text: '🌹 گیفت گل رز (25) 🔵' }],
-                    [{ text: '🎂 گیفت کیک (50) 🔵' }, { text: '🌷 گیفت گل (50) 🔵' }],
-                    [{ text: '🍾 گیفت بطری (50) 🔵' }, { text: '🚀 گیفت سفینه (50) 🔵' }],
-                    [{ text: '🏆 گیفت جام (100) 🔵' }, { text: '💍 گیفت حلقه (100) 🔵' }],
-                    [{ text: 'برگشت ↩️ 🔴' }]
+                    [{ text: '💖 گیفت قلب (15) 🔵', color: 'blue' }, { text: '🧸 گیفت تدی (15) 🔵', color: 'blue' }],
+                    [{ text: '🎁 گیفت کادو (25) 🔵', color: 'blue' }, { text: '🌹 گیفت گل رز (25) 🔵', color: 'blue' }],
+                    [{ text: '🎂 گیفت کیک (50) 🔵', color: 'blue' }, { text: '🌷 گیفت گل (50) 🔵', color: 'blue' }],
+                    [{ text: '🍾 گیفت بطری (50) 🔵', color: 'blue' }, { text: '🚀 گیفت سفینه (50) 🔵', color: 'blue' }],
+                    [{ text: '🏆 گیفت جام (100) 🔵', color: 'blue' }, { text: '💍 گیفت حلقه (100) 🔵', color: 'blue' }],
+                    [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                 ],
                 resize_keyboard: true
             }
@@ -1575,9 +1576,9 @@ bot.on('message', async (msg) => {
         const countKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: '🔻 کم کردن 🔴' }, { text: '📊 تعداد 🔵' }, { text: '🟢 اضافه کردن 🟢' }],
-                    [{ text: '➖ 🔴' }, { text: `${userData.giftCount}` }, { text: '➕ 🟢' }],
-                    [{ text: 'برگشت ↩️ 🔴' }, { text: '✅ ادامه 🟢' }]
+                    [{ text: '🔻 کم کردن 🔴', color: 'red' }, { text: '📊 تعداد 🔵', color: 'blue' }, { text: '🟢 اضافه کردن 🟢', color: 'green' }],
+                    [{ text: '➖ 🔴', color: 'red' }, { text: `${userData.giftCount}`, color: 'blue' }, { text: '➕ 🟢', color: 'green' }],
+                    [{ text: 'برگشت ↩️ 🔴', color: 'red' }, { text: '✅ ادامه 🟢', color: 'green' }]
                 ],
                 resize_keyboard: true
             }
@@ -1591,9 +1592,9 @@ bot.on('message', async (msg) => {
             const countKeyboard = {
                 reply_markup: {
                     keyboard: [
-                        [{ text: '🔻 کم کردن 🔴' }, { text: '📊 تعداد 🔵' }, { text: '🟢 اضافه کردن 🟢' }],
-                        [{ text: '➖ 🔴' }, { text: `${userData.giftCount}` }, { text: '➕ 🟢' }],
-                        [{ text: 'برگشت ↩️ 🔴' }, { text: '✅ ادامه 🟢' }]
+                        [{ text: '🔻 کم کردن 🔴', color: 'red' }, { text: '📊 تعداد 🔵', color: 'blue' }, { text: '🟢 اضافه کردن 🟢', color: 'green' }],
+                        [{ text: '➖ 🔴', color: 'red' }, { text: `${userData.giftCount}`, color: 'blue' }, { text: '➕ 🟢', color: 'green' }],
+                        [{ text: 'برگشت ↩️ 🔴', color: 'red' }, { text: '✅ ادامه 🟢', color: 'green' }]
                     ],
                     resize_keyboard: true
                 }
@@ -1608,9 +1609,9 @@ bot.on('message', async (msg) => {
             const countKeyboard = {
                 reply_markup: {
                     keyboard: [
-                        [{ text: '🔻 کم کردن 🔴' }, { text: '📊 تعداد 🔵' }, { text: '🟢 اضافه کردن 🟢' }],
-                        [{ text: '➖ 🔴' }, { text: `${userData.giftCount}` }, { text: '➕ 🟢' }],
-                        [{ text: 'برگشت ↩️ 🔴' }, { text: '✅ ادامه 🟢' }]
+                        [{ text: '🔻 کم کردن 🔴', color: 'red' }, { text: '📊 تعداد 🔵', color: 'blue' }, { text: '🟢 اضافه کردن 🟢', color: 'green' }],
+                        [{ text: '➖ 🔴', color: 'red' }, { text: `${userData.giftCount}`, color: 'blue' }, { text: '➕ 🟢', color: 'green' }],
+                        [{ text: 'برگشت ↩️ 🔴', color: 'red' }, { text: '✅ ادامه 🟢', color: 'green' }]
                     ],
                     resize_keyboard: true
                 }
@@ -1627,8 +1628,8 @@ bot.on('message', async (msg) => {
             const recipientKeyboard = {
                 reply_markup: {
                     keyboard: [
-                        [{ text: `برای خودم ( ${selfName} ) 🪪 🟢` }],
-                        [{ text: 'برگشت ↩️ 🔴' }]
+                        [{ text: `برای خودم ( ${selfName} ) 🪪 🟢`, color: 'green' }],
+                        [{ text: 'برگشت ↩️ 🔴', color: 'red' }]
                     ],
                     resize_keyboard: true
                 }
@@ -1685,8 +1686,8 @@ bot.on('message', async (msg) => {
         const increaseKeyboard = { 
             reply_markup: { 
                 keyboard: [
-                    [{ text: '💳 پرداخت ریالی 🟢' }], 
-                    [{ text: '🔙 بازگشت به منوی اصلی 🔴' }]
+                    [{ text: '💳 پرداخت ریالی 🟢', color: 'green' }], 
+                    [{ text: '🔙 بازگشت به منوی اصلی 🔴', color: 'red' }]
                 ], 
                 resize_keyboard: true 
             } 
@@ -1710,7 +1711,7 @@ bot.on('message', async (msg) => {
         const paymentKeyboard = {
             reply_markup: {
                 inline_keyboard: [[{ text: '🏷️ اعمال کد تخفیف 🔵', callback_data: 'apply_discount_prompt' }]],
-                keyboard: [[{ text: 'برگشت ↩️ 🔴' }]], 
+                keyboard: [[{ text: 'برگشت ↩️ 🔴', color: 'red' }]], 
                 resize_keyboard: true 
             }
         };
@@ -1720,8 +1721,8 @@ bot.on('message', async (msg) => {
         const supportKeyboard = { 
             reply_markup: { 
                 keyboard: [
-                    [{ text: '👤 پشتیبانی مستقیم 🔵' }, { text: '🎫 ارسال تیکت 🔵' }], 
-                    [{ text: '🔙 بازگشت به منوی اصلی 🔴' }]
+                    [{ text: '👤 پشتیبانی مستقیم 🔵', color: 'blue' }, { text: '🎫 ارسال تیکت 🔵', color: 'blue' }], 
+                    [{ text: '🔙 بازگشت به منوی اصلی 🔴', color: 'red' }]
                 ], 
                 resize_keyboard: true 
             } 
@@ -1781,7 +1782,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const paymentKeyboard = {
             reply_markup: {
                 inline_keyboard: [[{ text: '🏷️ اعمال کد تخفیف 🔵', callback_data: 'apply_discount_prompt' }]],
-                keyboard: [[{ text: 'برگشت ↩️ 🔴' }]], 
+                keyboard: [[{ text: 'برگشت ↩️ 🔴', color: 'red' }]], 
                 resize_keyboard: true 
             }
         };
