@@ -393,12 +393,24 @@ async function getBinanceTONPriceInToman() {
 async function fetchStarsPrice() {
     const tonToman = await getBinanceTONPriceInToman();
     const starUnitBase = (STAR_USD / 5.5) * tonToman; 
+    
+    // وقتی قیمت دستی تنظیم شده باشد، کارمزد 10٪ حذف می‌شود تا دقیقاً همان قیمت روی فاکتور کاربر اعمال شود
+    if (db.manualTonPrice && db.manualTonPrice > 0) {
+        return Math.round(starUnitBase);
+    }
+    
     return Math.round(starUnitBase * 1.10); 
 }
 
 async function fetchGramData() {
     const rawBinanceBase = await getBinanceTONPriceInToman();
-    const finalPrice = Math.round(rawBinanceBase * 1.10); 
+    
+    let finalPrice = Math.round(rawBinanceBase * 1.10);
+    // وقتی قیمت دستی تنظیم شده باشد، ضرب 10٪ حذف می‌شود
+    if (db.manualTonPrice && db.manualTonPrice > 0) {
+        finalPrice = rawBinanceBase;
+    }
+    
     const usdtToman = await getWallexUsdtPriceInToman();
     return { gramUsd: (rawBinanceBase / usdtToman).toFixed(2), finalPrice, usdtToman: rawBinanceBase };
 }
@@ -525,7 +537,13 @@ async function showGiftInvoice(chatId, userData) {
     const tonToman = await getBinanceTONPriceInToman();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
     const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
-    const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
+    
+    let starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
+    // حذف کارمزد 10٪ در صورت تنظیم دستی
+    if (db.manualTonPrice && db.manualTonPrice > 0) {
+        starziTomanPerUnit = Math.round(baseGiftToman);
+    }
+    
     const totalPrice = Math.round(starziTomanPerUnit * userData.giftCount);
     
     let discountVal = 0;
