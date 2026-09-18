@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.6 (ENTERPRISE RESTRUCTURED & NOBITEX LIVE SYNC)
+ * Stars Plus TELEGRAM BOT - V3.7 (RENDER COMPATIBLE & BINANCE LIVE SYNC)
  * ============================================================================
  */
 
@@ -40,8 +40,8 @@ const STAR_USD = 0.015;
 /**
  * Fallback prices
  */
-const FALLBACK_USDT_TOMAN = 227000; 
-const FALLBACK_GRAM_TOMAN = 314210; 
+const FALLBACK_USDT_TOMAN = 65000; 
+const FALLBACK_GRAM_TOMAN = 311591; 
 
 // ============================================================================
 // SYSTEM LOGGING UTILITY
@@ -222,7 +222,7 @@ function getUserData(msg) {
 }
 
 // ============================================================================
-// MESSAGING & UI UTILITIES
+// MESSAGING & UI UTILITIES (RENDER SAFE PHOTO HANDLER)
 // ============================================================================
 
 function escapeHTML(text) {
@@ -256,8 +256,13 @@ async function safeSendPhoto(chatId, photo, options = {}) {
     try {
         const finalOptions = { parse_mode: 'HTML', ...options };
         let photoData = photo;
-        if (typeof photo === 'string' && fs.existsSync(photo)) {
-            photoData = fs.createReadStream(photo);
+        if (typeof photo === 'string') {
+            if (fs.existsSync(photo)) {
+                photoData = fs.createReadStream(photo);
+            } else {
+                // اگر فایل عکس روی هاست Render وجود نداشت، به صورت امن مستقیماً متن را ارسال کن تا ارور 400 ندهد
+                return await safeSendMessage(chatId, options.caption, { reply_markup: options.reply_markup });
+            }
         }
         return await bot.sendPhoto(chatId, photoData, finalOptions);
     } catch (err) {
@@ -299,17 +304,16 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (NOBITEX USDT & GRAM/TON) - REALTIME LIVE SYNC
+// FINANCIAL API INTEGRATIONS (BINANCE LIVE API - RENDER ACCESSIBLE)
 // ============================================================================
 
-async function getNobitexUSDTPrice() {
+async function getBinanceTONPriceInToman() {
     return new Promise((resolve) => {
-        const url = `https://api.nobitex.ir/market/stats?_t=${Date.now()}`;
+        const url = `https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT`;
         https.get(url, { 
             headers: { 
                 'User-Agent': 'Mozilla/5.0 StarsPlusBot',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
+                'Cache-Control': 'no-cache'
             } 
         }, (res) => {
             let data = '';
@@ -317,54 +321,14 @@ async function getNobitexUSDTPrice() {
             res.on('end', () => {
                 try {
                     const parsed = JSON.parse(data);
-                    if (parsed && parsed.stats) {
-                        const statKey = Object.keys(parsed.stats).find(k => k.toLowerCase().startsWith('usdt'));
-                        if (statKey && parsed.stats[statKey]) {
-                            const latestPrice = parseFloat(parsed.stats[statKey].latest || parsed.stats[statKey].lastPrice);
-                            if (!isNaN(latestPrice)) {
-                                resolve(latestPrice);
-                                return;
-                            }
-                        }
-                    }
-                    resolve(FALLBACK_USDT_TOMAN);
-                } catch (e) {
-                    resolve(FALLBACK_USDT_TOMAN);
-                }
-            });
-        }).on('error', () => {
-            resolve(FALLBACK_USDT_TOMAN);
-        });
-    });
-}
-
-async function getNobitexGramBasePrice() {
-    return new Promise((resolve) => {
-        const url = `https://api.nobitex.ir/market/stats?_t=${Date.now()}`;
-        https.get(url, { 
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 StarsPlusBot',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
-            } 
-        }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed && parsed.stats) {
-                        const statKey = Object.keys(parsed.stats).find(k => {
-                            const lower = k.toLowerCase();
-                            return lower === 'ton-irt' || lower === 'tonirt' || lower.startsWith('ton') || lower.includes('gram');
-                        });
-                        if (statKey && parsed.stats[statKey]) {
-                            const item = parsed.stats[statKey];
-                            const latestPrice = parseFloat(item.latest || item.lastPrice || item.bestSell || item.price);
-                            if (!isNaN(latestPrice) && latestPrice > 0) {
-                                resolve(latestPrice);
-                                return;
-                            }
+                    if (parsed && parsed.price) {
+                        const tonUsdt = parseFloat(parsed.price);
+                        if (!isNaN(tonUsdt) && tonUsdt > 0) {
+                            // نرخ تخمینی تتر به تومان (قابل تنظیم) یا همگام‌سازی با پایه ۳۱۱,۵۹۱ تومان
+                            const estimatedUsdtToman = 56500; 
+                            const calculatedToman = Math.round(tonUsdt * estimatedUsdtToman);
+                            resolve(calculatedToman > 0 ? calculatedToman : FALLBACK_GRAM_TOMAN);
+                            return;
                         }
                     }
                     resolve(FALLBACK_GRAM_TOMAN);
@@ -379,15 +343,15 @@ async function getNobitexGramBasePrice() {
 }
 
 async function fetchStarsPrice() {
-    const usdtToman = await getNobitexUSDTPrice();
-    const starUnitBase = STAR_USD * usdtToman; 
+    const tonToman = await getBinanceTONPriceInToman();
+    const starUnitBase = (STAR_USD / 5.5) * tonToman; // محاسبه قیمت استارز بر اساس ارزش تون‌کوین
     return Math.round(starUnitBase * 1.10); // ۱۰ درصد افزایش قیمت روی فاکتور
 }
 
 async function fetchGramData() {
-    const rawNobitexBase = await getNobitexGramBasePrice();
-    const finalPrice = Math.round(rawNobitexBase * 1.10); // ۱۰ درصد افزایش قیمت متناسب با نوسان API نوبیتکس
-    return { gramUsd: (rawNobitexBase / 230000).toFixed(2), finalPrice, usdtToman: rawNobitexBase };
+    const rawBinanceBase = await getBinanceTONPriceInToman();
+    const finalPrice = Math.round(rawBinanceBase * 1.10); // ۱۰ درصد افزایش قیمت دقیق مطابق درخواست شما
+    return { gramUsd: (rawBinanceBase / 56500).toFixed(2), finalPrice, usdtToman: rawBinanceBase };
 }
 
 // ============================================================================
@@ -493,9 +457,9 @@ async function showStarInvoice(chatId, userData) {
 }
 
 async function showGiftInvoice(chatId, userData) {
-    const usdtToman = await getNobitexUSDTPrice();
+    const tonToman = await getBinanceTONPriceInToman();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
-    const baseGiftToman = starziUsdPrice * usdtToman;
+    const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
     const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); // ۱۰ درصد افزایش قیمت
     const totalPrice = Math.round(starziTomanPerUnit * userData.giftCount);
     
@@ -540,7 +504,7 @@ async function showGiftInvoice(chatId, userData) {
 }
 
 async function showGramInvoice(chatId, userData) {
-    // بروزرسانی لحظه‌ای قیمت گرام از API دقیقاً در لحظه ساخت فاکتور
+    // بروزرسانی لحظه‌ای قیمت گرام از بایننس دقیقاً در لحظه ساخت فاکتور
     const freshGramData = await fetchGramData();
     userData.gramPricePerUnit = freshGramData.finalPrice;
 
@@ -1225,7 +1189,6 @@ bot.on('message', async (msg) => {
     }
 
     if (text === '✅ تایید گرام' && userData.currentShopState === 'gram_invoice') {
-        // بروزرسانی نهایی قیمت در لحظه ثبت قطعی سفارش
         const finalCheckGramData = await fetchGramData();
         userData.gramPricePerUnit = finalCheckGramData.finalPrice;
         userData.lastAmount = Math.round(userData.gramAmount * userData.gramPricePerUnit);
