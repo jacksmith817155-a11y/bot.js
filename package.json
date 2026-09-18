@@ -1,0 +1,16 @@
+{
+  "name": "stars-plus-bot",
+  "version": "1.0.0",
+  "description": "Stars Plus Telegram Bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
