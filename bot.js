@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.8 (RENDER COMPATIBLE & BINANCE LIVE SYNC)
+ * Stars Plus TELEGRAM BOT - V3.8 (RENDER COMPATIBLE & ALANCHAND LIVE SYNC)
  * ============================================================================
  */
 
@@ -28,6 +28,7 @@ server.listen(PORT, () => {
 // ============================================================================
 
 const TOKEN = '8696660217:AAEBI6iOD-OAZpWbCIGy2KU-s-Fc5OQwwVE';
+const ALANCHAND_TOKEN = 'sFlHUWxpKeWw1S1eeXat';
 const ADMIN_ID_USERNAME = '@R3EUO';
 const ADMIN_NUMERIC_ID = 8942987641; 
 const DB_FILE = path.join(__dirname, 'database.json');
@@ -303,12 +304,12 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (BINANCE LIVE API)
+// FINANCIAL API INTEGRATIONS (ALANCHAND API)
 // ============================================================================
 
-async function getBinanceTONPriceInToman() {
+async function fetchAlanChandData(type = 'crypto') {
     return new Promise((resolve) => {
-        const url = `https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT`;
+        const url = `https://api.alanchand.com/?type=${type}&token=${ALANCHAND_TOKEN}`;
         https.get(url, { 
             headers: { 
                 'User-Agent': 'Mozilla/5.0 StarsPlusBot',
@@ -320,36 +321,59 @@ async function getBinanceTONPriceInToman() {
             res.on('end', () => {
                 try {
                     const parsed = JSON.parse(data);
-                    if (parsed && parsed.price) {
-                        const tonUsdt = parseFloat(parsed.price);
-                        if (!isNaN(tonUsdt) && tonUsdt > 0) {
-                            const estimatedUsdtToman = 56500; 
-                            const calculatedToman = Math.round(tonUsdt * estimatedUsdtToman);
-                            resolve(calculatedToman > 0 ? calculatedToman : FALLBACK_GRAM_TOMAN);
-                            return;
-                        }
-                    }
-                    resolve(FALLBACK_GRAM_TOMAN);
+                    resolve(parsed);
                 } catch (e) {
-                    resolve(FALLBACK_GRAM_TOMAN);
+                    resolve(null);
                 }
             });
-        }).on('error', () => {
-            resolve(FALLBACK_GRAM_TOMAN);
+        }).on('error', (err) => {
+            SystemLogger.error('AlanChandAPI', `Error fetching ${type} data`, err);
+            resolve(null);
         });
     });
 }
 
+async function getAlanChandTONPriceInToman() {
+    try {
+        const cryptoData = await fetchAlanChandData('crypto');
+        if (cryptoData) {
+            if (cryptoData.ton && (cryptoData.ton.sell || cryptoData.ton.buy || cryptoData.ton.price)) {
+                const tonPrice = parseFloat(cryptoData.ton.sell || cryptoData.ton.buy || cryptoData.ton.price);
+                if (!isNaN(tonPrice) && tonPrice > 0) {
+                    return Math.round(tonPrice);
+                }
+            }
+            if (cryptoData.usdt && (cryptoData.usdt.sell || cryptoData.usdt.buy || cryptoData.usdt.price)) {
+                const usdtPrice = parseFloat(cryptoData.usdt.sell || cryptoData.usdt.buy || cryptoData.usdt.price);
+                if (!isNaN(usdtPrice) && usdtPrice > 0) {
+                    return Math.round(usdtPrice * 5.5);
+                }
+            }
+        }
+
+        const currenciesData = await fetchAlanChandData('currencies');
+        if (currenciesData && currenciesData.usd && (currenciesData.usd.sell || currenciesData.usd.buy)) {
+            const usdPrice = parseFloat(currenciesData.usd.sell || currenciesData.usd.buy);
+            if (!isNaN(usdPrice) && usdPrice > 0) {
+                return Math.round(usdPrice * 5.5);
+            }
+        }
+    } catch (e) {
+        SystemLogger.error('AlanChandAPI', 'Failed to calculate price from AlanChand', e);
+    }
+    return FALLBACK_GRAM_TOMAN;
+}
+
 async function fetchStarsPrice() {
-    const tonToman = await getBinanceTONPriceInToman();
+    const tonToman = await getAlanChandTONPriceInToman();
     const starUnitBase = (STAR_USD / 5.5) * tonToman; 
     return Math.round(starUnitBase * 1.10); 
 }
 
 async function fetchGramData() {
-    const rawBinanceBase = await getBinanceTONPriceInToman();
-    const finalPrice = Math.round(rawBinanceBase * 1.10); 
-    return { gramUsd: (rawBinanceBase / 56500).toFixed(2), finalPrice, usdtToman: rawBinanceBase };
+    const rawAlanChandBase = await getAlanChandTONPriceInToman();
+    const finalPrice = Math.round(rawAlanChandBase * 1.10); 
+    return { gramUsd: (rawAlanChandBase / 56500).toFixed(2), finalPrice, usdtToman: rawAlanChandBase };
 }
 
 // ============================================================================
@@ -455,7 +479,7 @@ async function showStarInvoice(chatId, userData) {
 }
 
 async function showGiftInvoice(chatId, userData) {
-    const tonToman = await getBinanceTONPriceInToman();
+    const tonToman = await getAlanChandTONPriceInToman();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
     const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
     const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
