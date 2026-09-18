@@ -956,7 +956,6 @@ bot.on('message', async (msg) => {
 
     if (userData.waitingForGramWallet && text) {
         const walletInput = text.trim();
-        // تشخیص دقیق ولت معتبر گرام/تون (شروع با UQ یا EQ یا 0:)
         const isValidTonWallet = /^(UQ|EQ)[a-zA-Z0-9\-_]{46}$/.test(walletInput) || /^0:[a-fA-F0-9]{64}$/.test(walletInput) || (walletInput.length >= 40 && (walletInput.startsWith('UQ') || walletInput.startsWith('EQ') || walletInput.startsWith('0:')));
 
         if (!isValidTonWallet) {
@@ -1333,12 +1332,7 @@ bot.on('message', async (msg) => {
                     [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
                     [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
                     [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                    reply_markup: {
-    inline_keyboard: [
-        [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'main_menu' }]
-    ]
-}
-
+                    [{ text: '🔙 بازگشت به منوی اصلی' }]
                 ], resize_keyboard: true
             }
         };
@@ -1378,7 +1372,7 @@ bot.on('message', async (msg) => {
             reply_markup: {
                 keyboard: [
                     [{ text: 'محاسبه با موجودی من 🔄' }],
-                    [{ text: 'برگشت ↩️' ]]
+                    [{ text: 'برگشت ↩️' }]
                 ],
                 resize_keyboard: true
             }
