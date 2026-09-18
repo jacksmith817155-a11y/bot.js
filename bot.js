@@ -1333,7 +1333,12 @@ bot.on('message', async (msg) => {
                     [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
                     [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
                     [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
+                    reply_markup: {
+    inline_keyboard: [
+        [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'main_menu' }]
+    ]
+}
+
                 ], resize_keyboard: true
             }
         };
