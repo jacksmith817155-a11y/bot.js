@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.5 (ENTERPRISE RESTRUCTURED & USDT NOBITEX SYNCED)
+ * Stars Plus TELEGRAM BOT - V3.6 (ENTERPRISE RESTRUCTURED & NOBITEX LIVE SYNC)
  * ============================================================================
  */
 
@@ -178,7 +178,6 @@ function getUserDataById(userId) {
             selectedGiftStars: 0,
             giftCount: 1,
             recipientUsername: '',
-            isHided: false,
             commentText: 'تنظیم نشده',
             lastInvoiceMessageId: null,
             
@@ -300,7 +299,7 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (NOBITEX USDT & GRAM)
+// FINANCIAL API INTEGRATIONS (NOBITEX USDT & GRAM/TON)
 // ============================================================================
 
 async function getNobitexUSDTPrice() {
@@ -341,7 +340,7 @@ async function getNobitexGramBasePrice() {
                 try {
                     const parsed = JSON.parse(data);
                     if (parsed && parsed.stats) {
-                        const statKey = Object.keys(parsed.stats).find(k => k.startsWith('gram'));
+                        const statKey = Object.keys(parsed.stats).find(k => k.toLowerCase().startsWith('ton') || k.toLowerCase().includes('gram'));
                         if (statKey && parsed.stats[statKey]) {
                             const latestPrice = parseFloat(parsed.stats[statKey].latest || parsed.stats[statKey].lastPrice);
                             if (!isNaN(latestPrice)) {
@@ -369,7 +368,7 @@ async function fetchStarsPrice() {
 
 async function fetchGramData() {
     const rawNobitexBase = await getNobitexGramBasePrice();
-    const finalPrice = Math.round(rawNobitexBase + 30000);
+    const finalPrice = Math.round(rawNobitexBase * 1.10); // ۱۰ درصد افزایش قیمت متناسب با نوسان API نوبیتکس
     return { gramUsd: (rawNobitexBase / 230000).toFixed(2), finalPrice, usdtToman: rawNobitexBase };
 }
 
@@ -395,9 +394,9 @@ function getShopKeyboard() {
         reply_markup: {
             keyboard: [
                 [{ text: '📦 سفارش های اخیر من' }],
-                [{ text: '⭐️ استارز' }, { text: '💎 پرمیوم' }],
+                [{ text: '⭐️ استارز' }],
                 [{ text: '💠 خرید ارز گرام ( GRAM )' }],
-                [{ text: '🎁 گیفت استارزی' }, { text: '✨ بوست تلگرام' }],
+                [{ text: '🎁 گیفت استارزی' }],
                 [{ text: 'برگشت ↩️' }]
             ],
             resize_keyboard: true
@@ -498,7 +497,6 @@ async function showGiftInvoice(chatId, userData) {
         `مقدار خرید: ${escapeHTML(userData.selectedGiftName)} (${userData.selectedGiftStars} استارز)\n` +
         `تعداد: ${userData.giftCount}\n` +
         `یوزر دریافت‌کننده: @${escapeHTML(userData.recipientUsername)}\n\n` +
-        `گیفت هاید: ${userData.isHided ? 'بله' : 'خیر'}\n` +
         `کامنت: ${escapeHTML(userData.commentText)}\n\n` +
         `مبلغ نهایی: <b>${currentAmount.toLocaleString()} تومان</b>\n\n` +
         `در صورتی که جزئیات بالا مورد تأیید شماست ، روی دکمه تایید کلیک کنید.`;
@@ -508,7 +506,7 @@ async function showGiftInvoice(chatId, userData) {
             keyboard: [
                 [{ text: '✅ تایید' }, { text: 'لغو خرید ❌' }],
                 [{ text: '💳 اعمال کد تخفیف' }],
-                [{ text: '💬 تنظیم کامنت' }, { text: userData.isHided ? '🔓 لغو هاید' : '🔒 هاید گیفت' }],
+                [{ text: '💬 تنظیم کامنت' }],
                 [{ text: 'برگشت ↩️' }]
             ],
             resize_keyboard: true
@@ -1105,7 +1103,6 @@ bot.on('message', async (msg) => {
             giftName: `استارز تلگرام (${userData.starCount} عدد)`,
             count: userData.starCount,
             recipient: userData.starRecipient,
-            isHided: false,
             comment: 'ندارد',
             amount: userData.lastAmount,
             time: now,
@@ -1165,7 +1162,6 @@ bot.on('message', async (msg) => {
             giftName: userData.selectedGiftName,
             count: userData.giftCount,
             recipient: userData.recipientUsername,
-            isHided: userData.isHided,
             comment: userData.commentText,
             amount: userData.lastAmount,
             time: now,
@@ -1185,7 +1181,6 @@ bot.on('message', async (msg) => {
             `🎁 نام گیفت: ${escapeHTML(userData.selectedGiftName)} (${userData.selectedGiftStars} استارز)\n` +
             `🔢 تعداد: ${userData.giftCount}\n` +
             `📥 دریافت‌کننده: @${escapeHTML(userData.recipientUsername)}\n` +
-            `🔒 هاید: ${userData.isHided ? 'بله' : 'خیر'}\n` +
             `💬 کامنت: ${escapeHTML(userData.commentText)}\n` +
             `💰 مبلغ کل: ${userData.lastAmount.toLocaleString()} تومان\n` +
             `⏰ زمان ثبت: ${now}`;
@@ -1228,7 +1223,6 @@ bot.on('message', async (msg) => {
             giftName: `ارز گرام (${userData.gramAmount} GRAM)`,
             count: userData.gramAmount,
             recipient: userData.gramWalletAddress,
-            isHided: false,
             comment: userData.gramMemo,
             amount: userData.lastAmount,
             time: now,
@@ -1332,7 +1326,7 @@ bot.on('message', async (msg) => {
                     [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
                     [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
                     [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' }]
+                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
                 ], resize_keyboard: true
             }
         };
@@ -1532,11 +1526,6 @@ bot.on('message', async (msg) => {
         userData.waitingForComment = true;
         saveDatabase();
         await safeSendMessage(chatId, 'کامنت دلخواه خود را بفرستید:', backKeyboard);
-    }
-    else if (text === '🔒 هاید گیفت' || text === '🔓 لغو هاید') {
-        userData.isHided = !userData.isHided;
-        saveDatabase();
-        if (userData.currentShopState === 'gift_invoice') await showGiftInvoice(chatId, userData);
     }
     else if (text === '❤️ چطوری میتوانم به شما اعتماد کنم') {
         const trustMsg = `استارز پلاس با رضایت هزاران مشتری فعال در خدمت شماست.\n\nکانال اعتماد:\n@snt_shopp`;
