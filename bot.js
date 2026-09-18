@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.8 (RENDER COMPATIBLE & ALANCHAND LIVE SYNC)
+ * Stars Plus TELEGRAM BOT - V3.9 (RENDER COMPATIBLE, BINANCE & WALLEX LIVE SYNC)
  * ============================================================================
  */
 
@@ -28,7 +28,6 @@ server.listen(PORT, () => {
 // ============================================================================
 
 const TOKEN = '8696660217:AAEBI6iOD-OAZpWbCIGy2KU-s-Fc5OQwwVE';
-const ALANCHAND_TOKEN = 'sFlHUWxpKeWw1S1eeXat';
 const ADMIN_ID_USERNAME = '@R3EUO';
 const ADMIN_NUMERIC_ID = 8942987641; 
 const DB_FILE = path.join(__dirname, 'database.json');
@@ -105,7 +104,8 @@ let db = {
     users: {}, 
     orders: {}, 
     discountCodes: {},
-    secondaryAdmin: null
+    secondaryAdmin: null,
+    manualTonPrice: 0 // قیمت دستی به تومان (در صورت 0 بودن از API استفاده می‌شود)
 };
 
 function loadDatabase() {
@@ -113,6 +113,9 @@ function loadDatabase() {
         if (fs.existsSync(DB_FILE)) {
             const data = fs.readFileSync(DB_FILE, 'utf8');
             db = JSON.parse(data);
+            if (typeof db.manualTonPrice === 'undefined') {
+                db.manualTonPrice = 0;
+            }
             SystemLogger.info('Database', 'Successfully loaded records from disk.');
         } else {
             SystemLogger.info('Database', 'No existing database found. Initializing new storage.');
@@ -192,6 +195,7 @@ function getUserDataById(userId) {
             waitingForRejectReason: false,
             waitingForOrderRejectReason: false,
             waitingForReceiptRejectReason: false,
+            waitingForManualPrice: false,
             rejectOrderCode: null,
             adminAction: null,
             targetUserId: null,
@@ -304,12 +308,15 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (ALANCHAND API)
+// FINANCIAL API INTEGRATIONS (WALLEX & BINANCE LIVE API)
 // ============================================================================
 
-async function fetchAlanChandData(type = 'crypto') {
+/**
+ * دریافت نرخ زنده دلار/تتر به تومان از API والکس
+ */
+async function getWallexUsdtPriceInToman() {
     return new Promise((resolve) => {
-        const url = `https://api.alanchand.com/?type=${type}&token=${ALANCHAND_TOKEN}`;
+        const url = `https://api.wallex.ir/v1/markets`;
         https.get(url, { 
             headers: { 
                 'User-Agent': 'Mozilla/5.0 StarsPlusBot',
@@ -321,59 +328,79 @@ async function fetchAlanChandData(type = 'crypto') {
             res.on('end', () => {
                 try {
                     const parsed = JSON.parse(data);
-                    resolve(parsed);
+                    if (parsed && parsed.result && parsed.result.symbols && parsed.result.symbols.USDTTMN) {
+                        const stats = parsed.result.symbols.USDTTMN.stats;
+                        const usdtPrice = parseFloat(stats.lastPrice || stats.bidPrice);
+                        if (!isNaN(usdtPrice) && usdtPrice > 0) {
+                            resolve(Math.round(usdtPrice));
+                            return;
+                        }
+                    }
+                    resolve(FALLBACK_USDT_TOMAN);
                 } catch (e) {
-                    resolve(null);
+                    resolve(FALLBACK_USDT_TOMAN);
                 }
             });
-        }).on('error', (err) => {
-            SystemLogger.error('AlanChandAPI', `Error fetching ${type} data`, err);
-            resolve(null);
+        }).on('error', () => {
+            resolve(FALLBACK_USDT_TOMAN);
         });
     });
 }
 
-async function getAlanChandTONPriceInToman() {
-    try {
-        const cryptoData = await fetchAlanChandData('crypto');
-        if (cryptoData) {
-            if (cryptoData.ton && (cryptoData.ton.sell || cryptoData.ton.buy || cryptoData.ton.price)) {
-                const tonPrice = parseFloat(cryptoData.ton.sell || cryptoData.ton.buy || cryptoData.ton.price);
-                if (!isNaN(tonPrice) && tonPrice > 0) {
-                    return Math.round(tonPrice);
-                }
-            }
-            if (cryptoData.usdt && (cryptoData.usdt.sell || cryptoData.usdt.buy || cryptoData.usdt.price)) {
-                const usdtPrice = parseFloat(cryptoData.usdt.sell || cryptoData.usdt.buy || cryptoData.usdt.price);
-                if (!isNaN(usdtPrice) && usdtPrice > 0) {
-                    return Math.round(usdtPrice * 5.5);
-                }
-            }
-        }
-
-        const currenciesData = await fetchAlanChandData('currencies');
-        if (currenciesData && currenciesData.usd && (currenciesData.usd.sell || currenciesData.usd.buy)) {
-            const usdPrice = parseFloat(currenciesData.usd.sell || currenciesData.usd.buy);
-            if (!isNaN(usdPrice) && usdPrice > 0) {
-                return Math.round(usdPrice * 5.5);
-            }
-        }
-    } catch (e) {
-        SystemLogger.error('AlanChandAPI', 'Failed to calculate price from AlanChand', e);
+/**
+ * دریافت قیمت TON به تومان (استفاده از قیمت دستی در صورت تنظیم ادمین، یا ترکیب بایننس و والکس)
+ */
+async function getBinanceTONPriceInToman() {
+    // اگر ادمین قیمت دستی وارد کرده باشد، بلافاصله همان محاسبه می‌شود
+    if (db.manualTonPrice && db.manualTonPrice > 0) {
+        return db.manualTonPrice;
     }
-    return FALLBACK_GRAM_TOMAN;
+
+    const usdtToman = await getWallexUsdtPriceInToman();
+
+    return new Promise((resolve) => {
+        const url = `https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT`;
+        https.get(url, { 
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 StarsPlusBot',
+                'Cache-Control': 'no-cache'
+            } 
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    if (parsed && parsed.price) {
+                        const tonUsdt = parseFloat(parsed.price);
+                        if (!isNaN(tonUsdt) && tonUsdt > 0) {
+                            const calculatedToman = Math.round(tonUsdt * usdtToman);
+                            resolve(calculatedToman > 0 ? calculatedToman : FALLBACK_GRAM_TOMAN);
+                            return;
+                        }
+                    }
+                    resolve(FALLBACK_GRAM_TOMAN);
+                } catch (e) {
+                    resolve(FALLBACK_GRAM_TOMAN);
+                }
+            });
+        }).on('error', () => {
+            resolve(FALLBACK_GRAM_TOMAN);
+        });
+    });
 }
 
 async function fetchStarsPrice() {
-    const tonToman = await getAlanChandTONPriceInToman();
+    const tonToman = await getBinanceTONPriceInToman();
     const starUnitBase = (STAR_USD / 5.5) * tonToman; 
     return Math.round(starUnitBase * 1.10); 
 }
 
 async function fetchGramData() {
-    const rawAlanChandBase = await getAlanChandTONPriceInToman();
-    const finalPrice = Math.round(rawAlanChandBase * 1.10); 
-    return { gramUsd: (rawAlanChandBase / 56500).toFixed(2), finalPrice, usdtToman: rawAlanChandBase };
+    const rawBinanceBase = await getBinanceTONPriceInToman();
+    const finalPrice = Math.round(rawBinanceBase * 1.10); 
+    const usdtToman = await getWallexUsdtPriceInToman();
+    return { gramUsd: (rawBinanceBase / usdtToman).toFixed(2), finalPrice, usdtToman: rawBinanceBase };
 }
 
 // ============================================================================
@@ -423,6 +450,22 @@ function getAccountKeyboard() {
             keyboard: [
                 [{ text: '📦 سفارش های معلق من' }, { text: '📦 سفارش های اخیر من' }],
                 [{ text: 'برگشت ↩️' }]
+            ],
+            resize_keyboard: true
+        }
+    };
+}
+
+function getAdminPanelKeyboard() {
+    return {
+        reply_markup: {
+            keyboard: [
+                [{ text: '➕ افزایش موجودی کاربر' }, { text: '➖ کاهش موجودی کاربر' }],
+                [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
+                [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
+                [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
+                [{ text: '💎 تنظیم قیمت دستی (تومان)' }, { text: '⭐ تنظیمات قیمت استارز' }],
+                [{ text: '🔙 بازگشت به منوی اصلی' }]
             ],
             resize_keyboard: true
         }
@@ -479,7 +522,7 @@ async function showStarInvoice(chatId, userData) {
 }
 
 async function showGiftInvoice(chatId, userData) {
-    const tonToman = await getAlanChandTONPriceInToman();
+    const tonToman = await getBinanceTONPriceInToman();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
     const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
     const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
@@ -586,6 +629,7 @@ bot.on('message', async (msg) => {
     const mainKeyboard = getMainKeyboard(isAdmin);
     const backKeyboard = getBackKeyboard();
     const accountKeyboard = getAccountKeyboard();
+    const adminPanelMarkup = getAdminPanelKeyboard();
 
     if (text === 'لغو خرید ❌' || text === '❌ لغو خرید') {
         userData.currentShopState = null;
@@ -629,6 +673,7 @@ bot.on('message', async (msg) => {
             adminData.waitingForDiscountCapacity = false;
             adminData.waitingForDiscountExpiry = false;
             adminData.waitingForDiscountRestriction = false;
+            adminData.waitingForManualPrice = false;
         }
         
         saveDatabase();
@@ -673,6 +718,30 @@ bot.on('message', async (msg) => {
             await safeSendMessage(chatId, 'وقته محصول رو انتخاب کنی !\n\n🚀 تمامی سفارشات با بالاترین سرعت انجام میشن !', getShopKeyboard());
             return;
         }
+    }
+
+    // =========================================================================
+    // ADMIN MANUAL PRICE SETTING DISPATCHER
+    // =========================================================================
+    if (isAdmin && adminData.waitingForManualPrice && text) {
+        const cleanText = text.replace(/,/g, '').trim();
+        const newPrice = parseInt(cleanText);
+
+        if (isNaN(newPrice) || newPrice < 0) {
+            await safeSendMessage(chatId, '❌ لطفاً یک عدد معتبر به تومان وارد کنید (مثلاً 320000 یا عدد 0 برای حالت آنلاین):');
+            return;
+        }
+
+        db.manualTonPrice = newPrice;
+        adminData.waitingForManualPrice = false;
+        saveDatabase();
+
+        const statusMsg = newPrice === 0 
+            ? '✅ قیمت دستی غیرفعال شد و سیستم مجدداً به صورت <b>آنلاین به بایننس و والکس</b> متصل گردید.' 
+            : `✅ قیمت دستی به مبلغ <b>${newPrice.toLocaleString()} تومان</b> ذخیره شد و <b>بلافاصله در بخش خرید تمام کاربران</b> اعمال گردید.`;
+
+        await safeSendMessage(chatId, `<b>[ بروزرسانی قیمت ]</b>\n\n${statusMsg}`, adminPanelMarkup);
+        return;
     }
 
     if (isAdmin && adminData.waitingForOrderRejectReason && text) {
@@ -774,19 +843,6 @@ bot.on('message', async (msg) => {
                 restriction: adminData.tempDiscount.restriction
             };
             saveDatabase();
-
-            const adminPanelMarkup = {
-                reply_markup: {
-                    keyboard: [
-                        [{ text: '➕ افزایش موجودی کاربر' }, { text: '➖ کاهش موجودی کاربر' }],
-                        [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
-                        [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
-                        [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                        [{ text: '🔙 بازگشت به منوی اصلی' }]
-                    ], 
-                    resize_keyboard: true
-                }
-            };
 
             await safeSendMessage(chatId, 
                 `<b>کد تخفیف ساخته شد</b>\n\n` +
@@ -1334,19 +1390,32 @@ bot.on('message', async (msg) => {
     } 
 
     if (text === '🔧 پنل مدیریت' && isAdmin) {
-        const adminPanelMarkup = {
-            reply_markup: {
-                keyboard: [
-                    [{ text: '➕ افزایش موجودی کاربر' }, { text: '➖ کاهش موجودی کاربر' }],
-                    [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
-                    [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
-                    [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' }]
-                ], 
-                resize_keyboard: true
-            }
-        };
         await safeSendMessage(chatId, 'پنل مدیریت:', adminPanelMarkup);
+    }
+    else if (isAdmin && text === '💎 تنظیم قیمت دستی (تومان)') {
+        adminData.waitingForManualPrice = true;
+        saveDatabase();
+
+        const currentPriceText = db.manualTonPrice > 0 
+            ? `<b>${db.manualTonPrice.toLocaleString()} تومان (دستی)</b>` 
+            : `<b>خودکار (زنده از بایننس و والکس)</b>`;
+
+        const manualPriceMsg = 
+            `<b>[ تنظیم قیمت دستی ]</b>\n\n` +
+            `وضعیت فعلی قیمت: ${currentPriceText}\n\n` +
+            `لطفاً قیمت پایه جدید را به <b>تومان</b> وارد کنید:\n` +
+            `<i>(نکته: جهت بازگشت به حالت دریافت اتوماتیک از بایننس و والکس، عدد <code>0</code> را ارسال کنید)</i>`;
+
+        await safeSendMessage(chatId, manualPriceMsg, backKeyboard);
+    }
+    else if (isAdmin && text === '⭐ تنظیمات قیمت استارز') {
+        const liveStarPrice = await fetchStarsPrice();
+        const starSettingMsg = 
+            `<b>[ تنظیمات قیمت استارز ]</b>\n\n` +
+            `قیمت فعلی محاسبه‌شده هر واحد استارز: <b>${liveStarPrice.toLocaleString()} تومان</b>\n\n` +
+            `قیمت استارز بر اساس فرمول استاندارد به صورت خودکار محاسبه شده و از قیمت پایه پیرو می‌کند.`;
+
+        await safeSendMessage(chatId, starSettingMsg, adminPanelMarkup);
     }
     else if (isAdmin && ['➕ افزایش موجودی کاربر', '➖ کاهش موجودی کاربر', '🏆 تغییر سطح کاربر', '💳 تایید احراز هویت کاربر', '🚫 بن کردن کاربر', '✅ آنبن کردن کاربر', '👑 تنظیم مالک دوم'].includes(text)) {
         adminData.adminAction = text;
