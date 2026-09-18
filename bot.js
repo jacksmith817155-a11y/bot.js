@@ -1,12 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.4 (ENTERPRISE RESTRUCTURED & NOBITEX GRAM SYNCED)
- * ============================================================================
- * Features & Architecture Upgrades:
- * - Completely modular separation of buy flows, state managers, and handlers.
- * - Strict HTML entity safety and dynamic fallback handlers.
- * - Precision Wallet & Live Nobitex Gram API integration (Strict +30,000 Toman Markup per unit).
- * - Dynamic Reaction System with non-intrusive error boundaries.
+ * Stars Plus TELEGRAM BOT - V3.5 (ENTERPRISE RESTRUCTURED & USDT NOBITEX SYNCED)
  * ============================================================================
  */
 
@@ -33,24 +27,9 @@ server.listen(PORT, () => {
 // ENTERPRISE CONFIGURATION & CONSTANTS
 // ============================================================================
 
-/**
- * Core Bot Token provided by BotFather.
- */
 const TOKEN = '8696660217:AAEBI6iOD-OAZpWbCIGy2KU-s-Fc5OQwwVE';
-
-/**
- * The telegram username of the primary administrator.
- */
 const ADMIN_ID_USERNAME = '@R3EUO';
-
-/**
- * The numeric Telegram ID of the primary administrator.
- */
 const ADMIN_NUMERIC_ID = 8942987641; 
-
-/**
- * Path to the local JSON database file.
- */
 const DB_FILE = path.join(__dirname, 'database.json');
 
 /**
@@ -61,7 +40,7 @@ const STAR_USD = 0.015;
 /**
  * Fallback prices
  */
-const FALLBACK_USDT_TOMAN = 230444; 
+const FALLBACK_USDT_TOMAN = 227000; 
 const FALLBACK_GRAM_TOMAN = 314210; 
 
 // ============================================================================
@@ -321,8 +300,37 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (NOBITEX GRAM)
+// FINANCIAL API INTEGRATIONS (NOBITEX USDT & GRAM)
 // ============================================================================
+
+async function getNobitexUSDTPrice() {
+    return new Promise((resolve) => {
+        https.get('https://api.nobitex.ir/market/stats', { headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot' } }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    if (parsed && parsed.stats) {
+                        const statKey = Object.keys(parsed.stats).find(k => k.toLowerCase().startsWith('usdt'));
+                        if (statKey && parsed.stats[statKey]) {
+                            const latestPrice = parseFloat(parsed.stats[statKey].latest || parsed.stats[statKey].lastPrice);
+                            if (!isNaN(latestPrice)) {
+                                resolve(latestPrice);
+                                return;
+                            }
+                        }
+                    }
+                    resolve(FALLBACK_USDT_TOMAN);
+                } catch (e) {
+                    resolve(FALLBACK_USDT_TOMAN);
+                }
+            });
+        }).on('error', () => {
+            resolve(FALLBACK_USDT_TOMAN);
+        });
+    });
+}
 
 async function getNobitexGramBasePrice() {
     return new Promise((resolve) => {
@@ -354,14 +362,13 @@ async function getNobitexGramBasePrice() {
 }
 
 async function fetchStarsPrice() {
-    const baseGramToman = await getNobitexGramBasePrice();
-    const starUnitBase = (baseGramToman / 2.5); 
-    return Math.round(starUnitBase * 1.10);
+    const usdtToman = await getNobitexUSDTPrice();
+    const starUnitBase = STAR_USD * usdtToman; 
+    return Math.round(starUnitBase * 1.10); // ۱۰ درصد افزایش قیمت روی فاکتور
 }
 
 async function fetchGramData() {
     const rawNobitexBase = await getNobitexGramBasePrice();
-    // اعمال دقیق ۳۰,۰۰۰ تومان سود ثابت روی قیمت لحظه‌ای صرافی نوبیتکس برای هر واحد گرام
     const finalPrice = Math.round(rawNobitexBase + 30000);
     return { gramUsd: (rawNobitexBase / 230000).toFixed(2), finalPrice, usdtToman: rawNobitexBase };
 }
@@ -469,10 +476,10 @@ async function showStarInvoice(chatId, userData) {
 }
 
 async function showGiftInvoice(chatId, userData) {
-    const rawNobitexBase = await getNobitexGramBasePrice();
+    const usdtToman = await getNobitexUSDTPrice();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
-    const baseGiftToman = starziUsdPrice * (rawNobitexBase / 2.5);
-    const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
+    const baseGiftToman = starziUsdPrice * usdtToman;
+    const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); // ۱۰ درصد افزایش قیمت
     const totalPrice = Math.round(starziTomanPerUnit * userData.giftCount);
     
     let discountVal = 0;
@@ -948,7 +955,16 @@ bot.on('message', async (msg) => {
     }
 
     if (userData.waitingForGramWallet && text) {
-        userData.gramWalletAddress = text.trim();
+        const walletInput = text.trim();
+        // تشخیص دقیق ولت معتبر گرام/تون (شروع با UQ یا EQ یا 0:)
+        const isValidTonWallet = /^(UQ|EQ)[a-zA-Z0-9\-_]{46}$/.test(walletInput) || /^0:[a-fA-F0-9]{64}$/.test(walletInput) || (walletInput.length >= 40 && (walletInput.startsWith('UQ') || walletInput.startsWith('EQ') || walletInput.startsWith('0:')));
+
+        if (!isValidTonWallet) {
+            await safeSendMessage(chatId, '❌ آدرس ولت وارد شده معتبر نیست. لطفاً فقط آدرس ولت معتبر شبکه گرام (TON) که با UQ یا EQ شروع می‌شود را ارسال کنید:', backKeyboard);
+            return;
+        }
+
+        userData.gramWalletAddress = walletInput;
         userData.waitingForGramWallet = false;
         userData.waitingForGramMemoChoice = true;
         saveDatabase();
@@ -1317,7 +1333,7 @@ bot.on('message', async (msg) => {
                     [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
                     [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
                     [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' }]
+                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
                 ], resize_keyboard: true
             }
         };
@@ -1357,7 +1373,7 @@ bot.on('message', async (msg) => {
             reply_markup: {
                 keyboard: [
                     [{ text: 'محاسبه با موجودی من 🔄' }],
-                    [{ text: 'برگشت ↩️' }]
+                    [{ text: 'برگشت ↩️' ]]
                 ],
                 resize_keyboard: true
             }
