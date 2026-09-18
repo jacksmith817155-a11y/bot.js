@@ -299,12 +299,19 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (NOBITEX USDT & GRAM/TON)
+// FINANCIAL API INTEGRATIONS (NOBITEX USDT & GRAM/TON) - REALTIME LIVE SYNC
 // ============================================================================
 
 async function getNobitexUSDTPrice() {
     return new Promise((resolve) => {
-        https.get('https://api.nobitex.ir/market/stats', { headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot' } }, (res) => {
+        const url = `https://api.nobitex.ir/market/stats?_t=${Date.now()}`;
+        https.get(url, { 
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 StarsPlusBot',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            } 
+        }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -333,17 +340,28 @@ async function getNobitexUSDTPrice() {
 
 async function getNobitexGramBasePrice() {
     return new Promise((resolve) => {
-        https.get('https://api.nobitex.ir/market/stats', { headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot' } }, (res) => {
+        const url = `https://api.nobitex.ir/market/stats?_t=${Date.now()}`;
+        https.get(url, { 
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 StarsPlusBot',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            } 
+        }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
                 try {
                     const parsed = JSON.parse(data);
                     if (parsed && parsed.stats) {
-                        const statKey = Object.keys(parsed.stats).find(k => k.toLowerCase().startsWith('ton') || k.toLowerCase().includes('gram'));
+                        const statKey = Object.keys(parsed.stats).find(k => {
+                            const lower = k.toLowerCase();
+                            return lower === 'ton-irt' || lower === 'tonirt' || lower.startsWith('ton') || lower.includes('gram');
+                        });
                         if (statKey && parsed.stats[statKey]) {
-                            const latestPrice = parseFloat(parsed.stats[statKey].latest || parsed.stats[statKey].lastPrice);
-                            if (!isNaN(latestPrice)) {
+                            const item = parsed.stats[statKey];
+                            const latestPrice = parseFloat(item.latest || item.lastPrice || item.bestSell || item.price);
+                            if (!isNaN(latestPrice) && latestPrice > 0) {
                                 resolve(latestPrice);
                                 return;
                             }
@@ -522,6 +540,10 @@ async function showGiftInvoice(chatId, userData) {
 }
 
 async function showGramInvoice(chatId, userData) {
+    // بروزرسانی لحظه‌ای قیمت گرام از API دقیقاً در لحظه ساخت فاکتور
+    const freshGramData = await fetchGramData();
+    userData.gramPricePerUnit = freshGramData.finalPrice;
+
     const totalPrice = Math.round(userData.gramAmount * userData.gramPricePerUnit);
     userData.lastAmount = totalPrice;
     saveDatabase();
@@ -933,6 +955,9 @@ bot.on('message', async (msg) => {
 
     if (userData.waitingForGramAmount && text) {
         if (text === 'محاسبه با موجودی من 🔄') {
+            const liveGramData = await fetchGramData();
+            userData.gramPricePerUnit = liveGramData.finalPrice;
+            saveDatabase();
             const balanceGram = (userData.wallet / userData.gramPricePerUnit).toFixed(2);
             await safeSendMessage(chatId, `موجودی شما: ${userData.wallet.toLocaleString()} تومان\nمعادل ${balanceGram} گرام.\nلطفاً تعداد گرام را وارد کنید:`, backKeyboard);
             return;
@@ -1200,6 +1225,12 @@ bot.on('message', async (msg) => {
     }
 
     if (text === '✅ تایید گرام' && userData.currentShopState === 'gram_invoice') {
+        // بروزرسانی نهایی قیمت در لحظه ثبت قطعی سفارش
+        const finalCheckGramData = await fetchGramData();
+        userData.gramPricePerUnit = finalCheckGramData.finalPrice;
+        userData.lastAmount = Math.round(userData.gramAmount * userData.gramPricePerUnit);
+        saveDatabase();
+
         if (userData.wallet < userData.lastAmount) {
             const shortage = userData.lastAmount - userData.wallet;
             const shortageKeyboard = {
