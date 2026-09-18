@@ -1,12 +1,12 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.2 (ENTERPRISE RESTRUCTURED)
+ * Stars Plus TELEGRAM BOT - V3.3 (ENTERPRISE RESTRUCTURED)
  * ============================================================================
  * Features & Architecture Upgrades:
  * - Completely modular separation of buy flows, state managers, and handlers.
  * - Strict HTML entity safety and dynamic fallback handlers.
- * - Precision Wallet & Live Binance/Wallex API integration (10% Dynamic Markup).
- * - Dynamic Reaction System with non-intrusive error boundaries.
+ * - Precision Wallet & Live Binance/Wallex API integration (Exact 10% Dynamic Markup).
+ * - Strict TON Wallet Validation & Toggle Gift Hide Fix.
  * ============================================================================
  */
 
@@ -321,7 +321,7 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (BINANCE & WALLEX)
+// FINANCIAL API INTEGRATIONS (BINANCE & WALLEX) - EXACT 10% MARKUP
 // ============================================================================
 
 async function getUsdtToToman() {
@@ -350,7 +350,7 @@ async function getUsdtToToman() {
 async function fetchStarsPrice() {
     const rawUsdtToman = await getUsdtToToman();
     const starToman = STAR_USD * rawUsdtToman;
-    // دقیقا ۱۰ درصد سود روی قیمت استارز
+    // افزودن دقیقاً ۱۰ درصد سود به قیمت پایه صرافی
     return Math.round(starToman * 1.10);
 }
 
@@ -381,7 +381,7 @@ async function fetchTonData() {
     const rawUsdt = await getUsdtToToman();
     const tonUsd = await getBinancePriceUsd('TONUSDT');
     const tonToman = tonUsd * rawUsdt;
-    // دقیقا ۱۰ درصد سود روی ارز تون
+    // افزودن دقیقاً ۱۰ درصد سود به قیمت پایه صرافی برای ارز تون
     const finalPrice = Math.round(tonToman * 1.10);
     return { tonUsd: tonUsd.toFixed(2), finalPrice, usdtToman: rawUsdt };
 }
@@ -492,7 +492,7 @@ async function showGiftInvoice(chatId, userData) {
     const rawUsdtToman = await getUsdtToToman();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
     const baseGiftToman = starziUsdPrice * rawUsdtToman;
-    // ۱۰ درصد سود دقیق
+    // دقیقاً ۱۰ درصد سود روی قیمت گیفت
     const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
     const totalPrice = Math.round(starziTomanPerUnit * userData.giftCount);
     
@@ -964,12 +964,21 @@ bot.on('message', async (msg) => {
         userData.waitingForTonWallet = true;
         saveDatabase();
 
-        await safeSendMessage(chatId, `لطفاً آدرس ولت تون خود را ارسال کنید:`, backKeyboard);
+        await safeSendMessage(chatId, `لطفاً آدرس ولت تون خود را ارسال کنید:\n\n(⚠️ توجه: فقط آدرس معتبر شبکه TON پذیرفته می‌شود)`, backKeyboard);
         return;
     }
 
+    // STRICT TON WALLET ADDRESS VALIDATION HANDLER
     if (userData.waitingForTonWallet && text) {
-        userData.tonWalletAddress = text.trim();
+        const walletInput = text.trim();
+        const isValidTonAddress = /^(EQ|UQ)[A-Za-z0-9\-_]{46}$/.test(walletInput) || /^0:[a-fA-F0-9]{64}$/.test(walletInput) || (walletInput.length >= 40 && (walletInput.startsWith('EQ') || walletInput.startsWith('UQ')));
+        
+        if (!isValidTonAddress) {
+            await safeSendMessage(chatId, '❌ آدرس ولت وارد شده معتبر نیست!\n\nلطفاً فقط آدرس معتبر ولت شبکه TON (شروع با EQ یا UQ) را ارسال کنید:', backKeyboard);
+            return;
+        }
+
+        userData.tonWalletAddress = walletInput;
         userData.waitingForTonWallet = false;
         userData.waitingForTonMemoChoice = true;
         saveDatabase();
@@ -1539,10 +1548,14 @@ bot.on('message', async (msg) => {
         saveDatabase();
         await safeSendMessage(chatId, 'کامنت دلخواه خود را بفرستید:', backKeyboard);
     }
+    // FIXED GIFT HIDE TOGGLE (Updates state and refreshes invoice without triggering orders)
     else if (text === '🔒 هاید گیفت' || text === '🔓 لغو هاید') {
         userData.isHided = !userData.isHided;
         saveDatabase();
-        if (userData.currentShopState === 'gift_invoice') await showGiftInvoice(chatId, userData);
+        if (userData.currentShopState === 'gift_invoice') {
+            await showGiftInvoice(chatId, userData);
+        }
+        return;
     }
     else if (text === '❤️ چطوری میتوانم به شما اعتماد کنم') {
         const trustMsg = `استارز پلاس با رضایت هزاران مشتری فعال در خدمت شماست.\n\nکانال اعتماد:\n@snt_shopp`;
