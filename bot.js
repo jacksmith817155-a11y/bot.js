@@ -1,11 +1,11 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.3 (ENTERPRISE RESTRUCTURED & NOBITEX SYNCED)
+ * Stars Plus TELEGRAM BOT - V3.4 (ENTERPRISE RESTRUCTURED & NOBITEX GRAM SYNCED)
  * ============================================================================
  * Features & Architecture Upgrades:
  * - Completely modular separation of buy flows, state managers, and handlers.
  * - Strict HTML entity safety and dynamic fallback handlers.
- * - Precision Wallet & Live Nobitex API integration (Strict 10% Dynamic Markup).
+ * - Precision Wallet & Live Nobitex Gram API integration (Strict +30,000 Toman Markup per unit).
  * - Dynamic Reaction System with non-intrusive error boundaries.
  * ============================================================================
  */
@@ -62,7 +62,7 @@ const STAR_USD = 0.015;
  * Fallback prices
  */
 const FALLBACK_USDT_TOMAN = 230444; 
-const FALLBACK_TON_TOMAN = 311591; 
+const FALLBACK_GRAM_TOMAN = 314210; 
 
 // ============================================================================
 // SYSTEM LOGGING UTILITY
@@ -178,10 +178,10 @@ function getUserDataById(userId) {
             waitingForComment: false,
             waitingForTrackingInput: false,
             
-            waitingForTonAmount: false,
-            waitingForTonWallet: false,
-            waitingForTonMemoChoice: false,
-            waitingForTonMemoInput: false,
+            waitingForGramAmount: false,
+            waitingForGramWallet: false,
+            waitingForGramMemoChoice: false,
+            waitingForGramMemoInput: false,
 
             waitingForStarCount: false,
             waitingForStarRecipient: false,
@@ -203,10 +203,10 @@ function getUserDataById(userId) {
             commentText: 'تنظیم نشده',
             lastInvoiceMessageId: null,
             
-            tonAmount: 0,
-            tonPricePerUnit: 0,
-            tonWalletAddress: '',
-            tonMemo: 'ندارد',
+            gramAmount: 0,
+            gramPricePerUnit: 0,
+            gramWalletAddress: '',
+            gramMemo: 'ندارد',
             
             waitingForAdminUserSearch: false,
             waitingForAdminAmount: false,
@@ -321,10 +321,10 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (NOBITEX)
+// FINANCIAL API INTEGRATIONS (NOBITEX GRAM)
 // ============================================================================
 
-async function getNobitexTonBasePrice() {
+async function getNobitexGramBasePrice() {
     return new Promise((resolve) => {
         https.get('https://api.nobitex.ir/market/stats', { headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot' } }, (res) => {
             let data = '';
@@ -333,7 +333,7 @@ async function getNobitexTonBasePrice() {
                 try {
                     const parsed = JSON.parse(data);
                     if (parsed && parsed.stats) {
-                        const statKey = Object.keys(parsed.stats).find(k => k.startsWith('ton'));
+                        const statKey = Object.keys(parsed.stats).find(k => k.startsWith('gram'));
                         if (statKey && parsed.stats[statKey]) {
                             const latestPrice = parseFloat(parsed.stats[statKey].latest || parsed.stats[statKey].lastPrice);
                             if (!isNaN(latestPrice)) {
@@ -342,29 +342,28 @@ async function getNobitexTonBasePrice() {
                             }
                         }
                     }
-                    resolve(FALLBACK_TON_TOMAN);
+                    resolve(FALLBACK_GRAM_TOMAN);
                 } catch (e) {
-                    resolve(FALLBACK_TON_TOMAN);
+                    resolve(FALLBACK_GRAM_TOMAN);
                 }
             });
         }).on('error', () => {
-            resolve(FALLBACK_TON_TOMAN);
+            resolve(FALLBACK_GRAM_TOMAN);
         });
     });
 }
 
 async function fetchStarsPrice() {
-    const baseTonToman = await getNobitexTonBasePrice();
-    // محاسبه دقیق بر اساس قیمت پایه نوبیتکس با اعمال دقیق ۱۰ درصد افزایش قیمت نهایی
-    const starUnitBase = (baseTonToman / 2.5); 
+    const baseGramToman = await getNobitexGramBasePrice();
+    const starUnitBase = (baseGramToman / 2.5); 
     return Math.round(starUnitBase * 1.10);
 }
 
-async function fetchTonData() {
-    const rawNobitexBase = await getNobitexTonBasePrice();
-    // اعمال دقیق ۱۰ درصد افزایش قیمت روی نرخ صرافی نوبیتکس (مثلا ۳۱۱,۵۹۱ تومان تبدیل به ۳۴۲,۵۹۱ تومان میشود)
-    const finalPrice = Math.round(rawNobitexBase * 1.10);
-    return { tonUsd: (rawNobitexBase / 230000).toFixed(2), finalPrice, usdtToman: rawNobitexBase };
+async function fetchGramData() {
+    const rawNobitexBase = await getNobitexGramBasePrice();
+    // اعمال دقیق ۳۰,۰۰۰ تومان سود ثابت روی قیمت لحظه‌ای صرافی نوبیتکس برای هر واحد گرام
+    const finalPrice = Math.round(rawNobitexBase + 30000);
+    return { gramUsd: (rawNobitexBase / 230000).toFixed(2), finalPrice, usdtToman: rawNobitexBase };
 }
 
 // ============================================================================
@@ -390,7 +389,7 @@ function getShopKeyboard() {
             keyboard: [
                 [{ text: '📦 سفارش های اخیر من' }],
                 [{ text: '⭐️ استارز' }, { text: '💎 پرمیوم' }],
-                [{ text: '💠 خرید ارز تون' }],
+                [{ text: '💠 خرید ارز گرام ( GRAM )' }],
                 [{ text: '🎁 گیفت استارزی' }, { text: '✨ بوست تلگرام' }],
                 [{ text: 'برگشت ↩️' }]
             ],
@@ -470,10 +469,9 @@ async function showStarInvoice(chatId, userData) {
 }
 
 async function showGiftInvoice(chatId, userData) {
-    const rawNobitexBase = await getNobitexTonBasePrice();
+    const rawNobitexBase = await getNobitexGramBasePrice();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
     const baseGiftToman = starziUsdPrice * (rawNobitexBase / 2.5);
-    // اعمال دقیق ۱۰ درصد سود روی قیمت گیفت‌ها
     const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
     const totalPrice = Math.round(starziTomanPerUnit * userData.giftCount);
     
@@ -518,23 +516,23 @@ async function showGiftInvoice(chatId, userData) {
     }
 }
 
-async function showTonInvoice(chatId, userData) {
-    const totalPrice = Math.round(userData.tonAmount * userData.tonPricePerUnit);
+async function showGramInvoice(chatId, userData) {
+    const totalPrice = Math.round(userData.gramAmount * userData.gramPricePerUnit);
     userData.lastAmount = totalPrice;
     saveDatabase();
 
     const invoiceMsg = 
-        `<b>[ فاکتور خرید ارز تون ]</b>\n\n` +
-        `مقدار خرید: ${userData.tonAmount} تون\n` +
-        `آدرس ولت: <code>${escapeHTML(userData.tonWalletAddress)}</code>\n` +
-        `کامنت (مم): ${escapeHTML(userData.tonMemo)}\n\n` +
+        `<b>[ فاکتور خرید ارز گرام ( GRAM ) ]</b>\n\n` +
+        `مقدار خرید: ${userData.gramAmount} گرام\n` +
+        `آدرس ولت: <code>${escapeHTML(userData.gramWalletAddress)}</code>\n` +
+        `کامنت (مم): ${escapeHTML(userData.gramMemo)}\n\n` +
         `مبلغ نهایی: <b>${totalPrice.toLocaleString()} تومان</b>\n\n` +
         `در صورتی که جزئیات بالا مورد تأیید شماست ، روی دکمه تایید کلیک کنید.`;
 
     const invoiceKeyboard = {
         reply_markup: {
             keyboard: [
-                [{ text: '✅ تایید تون' }, { text: 'لغو خرید ❌' }],
+                [{ text: '✅ تایید گرام' }, { text: 'لغو خرید ❌' }],
                 [{ text: '💳 اعمال کد تخفیف' }],
                 [{ text: 'برگشت ↩️' }]
             ],
@@ -599,10 +597,10 @@ bot.on('message', async (msg) => {
         userData.waitingForComment = false;
         userData.waitingForTrackingInput = false;
         
-        userData.waitingForTonAmount = false;
-        userData.waitingForTonWallet = false;
-        userData.waitingForTonMemoChoice = false;
-        userData.waitingForTonMemoInput = false;
+        userData.waitingForGramAmount = false;
+        userData.waitingForGramWallet = false;
+        userData.waitingForGramMemoChoice = false;
+        userData.waitingForGramMemoInput = false;
         
         userData.waitingForStarCount = false;
         userData.waitingForStarRecipient = false;
@@ -738,7 +736,7 @@ bot.on('message', async (msg) => {
                 reply_markup: {
                     keyboard: [
                         [{ text: '🌐 بدون محدودیت' }, { text: '⭐ محدودیت برای استارز' }],
-                        [{ text: '💠 محدودیت برای تون' }, { text: '🎁 محدودیت برای گیفت‌ها' }],
+                        [{ text: '💠 محدودیت برای گرام' }, { text: '🎁 محدودیت برای گیفت‌ها' }],
                         [{ text: 'برگشت ↩️' }]
                     ],
                     resize_keyboard: true
@@ -751,7 +749,7 @@ bot.on('message', async (msg) => {
         if (adminData.waitingForDiscountRestriction && text) {
             adminData.waitingForDiscountRestriction = false;
             if (text === '⭐ محدودیت برای استارز') adminData.tempDiscount.restriction = 'stars';
-            else if (text === '💠 محدودیت برای تون') adminData.tempDiscount.restriction = 'ton';
+            else if (text === '💠 محدودیت برای گرام') adminData.tempDiscount.restriction = 'gram';
             else if (text === '🎁 محدودیت برای گیفت‌ها') adminData.tempDiscount.restriction = 'gift_stars';
             else adminData.tempDiscount.restriction = null;
 
@@ -928,31 +926,31 @@ bot.on('message', async (msg) => {
         return;
     }
 
-    if (userData.waitingForTonAmount && text) {
+    if (userData.waitingForGramAmount && text) {
         if (text === 'محاسبه با موجودی من 🔄') {
-            const balanceTon = (userData.wallet / userData.tonPricePerUnit).toFixed(2);
-            await safeSendMessage(chatId, `موجودی شما: ${userData.wallet.toLocaleString()} تومان\nمعادل ${balanceTon} تون.\nلطفاً تعداد تون را وارد کنید:`, backKeyboard);
+            const balanceGram = (userData.wallet / userData.gramPricePerUnit).toFixed(2);
+            await safeSendMessage(chatId, `موجودی شما: ${userData.wallet.toLocaleString()} تومان\nمعادل ${balanceGram} گرام.\nلطفاً تعداد گرام را وارد کنید:`, backKeyboard);
             return;
         }
 
-        const tonInput = parseFloat(text);
-        if (isNaN(tonInput) || tonInput < 0.1) {
-            await safeSendMessage(chatId, '❌ حداقل خرید ۰.۱ تون است.', backKeyboard);
+        const gramInput = parseFloat(text);
+        if (isNaN(gramInput) || gramInput < 0.1) {
+            await safeSendMessage(chatId, '❌ حداقل خرید ۰.۱ گرام است.', backKeyboard);
             return;
         }
-        userData.tonAmount = tonInput;
-        userData.waitingForTonAmount = false;
-        userData.waitingForTonWallet = true;
+        userData.gramAmount = gramInput;
+        userData.waitingForGramAmount = false;
+        userData.waitingForGramWallet = true;
         saveDatabase();
 
-        await safeSendMessage(chatId, `لطفاً آدرس ولت تون خود را ارسال کنید:`, backKeyboard);
+        await safeSendMessage(chatId, `لطفاً آدرس ولت گرام خود را ارسال کنید:`, backKeyboard);
         return;
     }
 
-    if (userData.waitingForTonWallet && text) {
-        userData.tonWalletAddress = text.trim();
-        userData.waitingForTonWallet = false;
-        userData.waitingForTonMemoChoice = true;
+    if (userData.waitingForGramWallet && text) {
+        userData.gramWalletAddress = text.trim();
+        userData.waitingForGramWallet = false;
+        userData.waitingForGramMemoChoice = true;
         saveDatabase();
 
         const memoKeyboard = {
@@ -964,33 +962,33 @@ bot.on('message', async (msg) => {
                 resize_keyboard: true
             }
         };
-        await safeSendMessage(chatId, 'آیا برای واریز تون کامنت (ممو) دارید؟', memoKeyboard);
+        await safeSendMessage(chatId, 'آیا برای واریز گرام کامنت (ممو) دارید؟', memoKeyboard);
         return;
     }
 
-    if (userData.waitingForTonMemoChoice && text) {
+    if (userData.waitingForGramMemoChoice && text) {
         if (text === '❌ رد کردن') {
-            userData.tonMemo = 'ندارد';
-            userData.waitingForTonMemoChoice = false;
-            userData.currentShopState = 'ton_invoice';
+            userData.gramMemo = 'ندارد';
+            userData.waitingForGramMemoChoice = false;
+            userData.currentShopState = 'gram_invoice';
             saveDatabase();
-            await showTonInvoice(chatId, userData);
+            await showGramInvoice(chatId, userData);
             return;
         } else if (text === '💬 بله، کامنت دارم') {
-            userData.waitingForTonMemoChoice = false;
-            userData.waitingForTonMemoInput = true;
+            userData.waitingForGramMemoChoice = false;
+            userData.waitingForGramMemoInput = true;
             saveDatabase();
             await safeSendMessage(chatId, 'لطفاً متن کامنت خود را وارد کنید:', backKeyboard);
             return;
         }
     }
 
-    if (userData.waitingForTonMemoInput && text) {
-        userData.tonMemo = text.trim();
-        userData.waitingForTonMemoInput = false;
-        userData.currentShopState = 'ton_invoice';
+    if (userData.waitingForGramMemoInput && text) {
+        userData.gramMemo = text.trim();
+        userData.waitingForGramMemoInput = false;
+        userData.currentShopState = 'gram_invoice';
         saveDatabase();
-        await showTonInvoice(chatId, userData);
+        await showGramInvoice(chatId, userData);
         return;
     }
 
@@ -1041,7 +1039,7 @@ bot.on('message', async (msg) => {
         
         if (userData.currentShopState === 'gift_invoice') await showGiftInvoice(chatId, userData);
         else if (userData.currentShopState === 'star_invoice') await showStarInvoice(chatId, userData);
-        else if (userData.currentShopState === 'ton_invoice') await showTonInvoice(chatId, userData);
+        else if (userData.currentShopState === 'gram_invoice') await showGramInvoice(chatId, userData);
         return;
     }
 
@@ -1191,7 +1189,7 @@ bot.on('message', async (msg) => {
         return;
     }
 
-    if (text === '✅ تایید تون' && userData.currentShopState === 'ton_invoice') {
+    if (text === '✅ تایید گرام' && userData.currentShopState === 'gram_invoice') {
         if (userData.wallet < userData.lastAmount) {
             const shortage = userData.lastAmount - userData.wallet;
             const shortageKeyboard = {
@@ -1206,17 +1204,17 @@ bot.on('message', async (msg) => {
         }
 
         userData.wallet -= userData.lastAmount;
-        const trackingCode = 'TON-' + Math.floor(10000 + Math.random() * 90000);
+        const trackingCode = 'GRAM-' + Math.floor(10000 + Math.random() * 90000);
         const now = new Date().toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' });
 
         db.orders[trackingCode] = {
             userId: chatId,
             firstName: userData.firstName,
-            giftName: `ارز تون (${userData.tonAmount} TON)`,
-            count: userData.tonAmount,
-            recipient: userData.tonWalletAddress,
+            giftName: `ارز گرام (${userData.gramAmount} GRAM)`,
+            count: userData.gramAmount,
+            recipient: userData.gramWalletAddress,
             isHided: false,
-            comment: userData.tonMemo,
+            comment: userData.gramMemo,
             amount: userData.lastAmount,
             time: now,
             status: 'pending'
@@ -1224,17 +1222,17 @@ bot.on('message', async (msg) => {
         userData.lastInvoiceMessageId = null;
         saveDatabase();
 
-        const userConfirmMsg = `سفارش تون ثبت شد و مبلغ کسر گردید.\n\nکد پیگیری: <code>${trackingCode}</code>`;
+        const userConfirmMsg = `سفارش گرام ثبت شد و مبلغ کسر گردید.\n\nکد پیگیری: <code>${trackingCode}</code>`;
         await safeSendMessage(chatId, userConfirmMsg, mainKeyboard);
 
         const adminOrderMsg = 
-            `<b>[ سفارش جدید ارز تون ]</b>\n\n` +
+            `<b>[ سفارش جدید ارز گرام ]</b>\n\n` +
             `👤 نام کاربر: ${escapeHTML(userData.firstName)}\n` +
             `🆔 آیدی عددی: <code>${chatId}</code>\n` +
             `🏷️ کد پیگیری: <code>${trackingCode}</code>\n` +
-            `💠 مقدار تون: ${userData.tonAmount}\n` +
-            `📫 آدرس ولت: <code>${escapeHTML(userData.tonWalletAddress)}</code>\n` +
-            `💬 ممو / کامنت: ${escapeHTML(userData.tonMemo)}\n` +
+            `💠 مقدار گرام: ${userData.gramAmount}\n` +
+            `📫 آدرس ولت: <code>${escapeHTML(userData.gramWalletAddress)}</code>\n` +
+            `💬 ممو / کامنت: ${escapeHTML(userData.gramMemo)}\n` +
             `💰 مبلغ کل: ${userData.lastAmount.toLocaleString()} تومان\n` +
             `⏰ زمان ثبت: ${now}`;
 
@@ -1319,7 +1317,7 @@ bot.on('message', async (msg) => {
                     [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
                     [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
                     [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
+                    [{ text: '🔙 بازگشت به منوی اصلی' }]
                 ], resize_keyboard: true
             }
         };
@@ -1366,14 +1364,14 @@ bot.on('message', async (msg) => {
         };
         await safeSendPhoto(chatId, '1000002624.jpg', { caption: starMsg, reply_markup: starMenuKeyboard.reply_markup });
     }
-    else if (text === '💠 خرید ارز تون' || text === '💠 خرید ارز تون ( GRAM )') {
-        userData.currentShopState = 'ton_wallet_flow';
+    else if (text === '💠 خرید ارز گرام ( GRAM )') {
+        userData.currentShopState = 'gram_wallet_flow';
         saveDatabase();
-        const tonData = await fetchTonData();
-        userData.tonPricePerUnit = tonData.finalPrice;
+        const gramData = await fetchGramData();
+        userData.gramPricePerUnit = gramData.finalPrice;
         saveDatabase();
 
-        const tonWalletFlowKeyboard = {
+        const gramWalletFlowKeyboard = {
             reply_markup: {
                 keyboard: [
                     [{ text: 'محاسبه با موجودی من 🔄' }],
@@ -1382,8 +1380,8 @@ bot.on('message', async (msg) => {
                 resize_keyboard: true
             }
         };
-        await safeSendMessage(chatId, `تعداد تون مورد نظر را وارد کنید:`, tonWalletFlowKeyboard);
-        userData.waitingForTonAmount = true;
+        await safeSendMessage(chatId, `تعداد گرام مورد نظر را وارد کنید:`, gramWalletFlowKeyboard);
+        userData.waitingForGramAmount = true;
         saveDatabase();
     }
     else if (text === '🎁 گیفت استارزی' || text === '🎁 گیفت‌های استارزی') {
