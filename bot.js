@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.9 (RENDER COMPATIBLE, BINANCE & WALLEX LIVE SYNC)
+ * Stars Plus TELEGRAM BOT - V3.10 (RENDER COMPATIBLE, BINANCE & WALLEX LIVE SYNC)
  * ============================================================================
  */
 
@@ -105,7 +105,8 @@ let db = {
     orders: {}, 
     discountCodes: {},
     secondaryAdmin: null,
-    manualTonPrice: 0 // قیمت دستی به تومان (در صورت 0 بودن از API استفاده می‌شود)
+    manualTonPrice: 0, // قیمت دستی تون به تومان
+    manualStarPrice: 0 // قیمت دستی استارز به تومان
 };
 
 function loadDatabase() {
@@ -113,9 +114,8 @@ function loadDatabase() {
         if (fs.existsSync(DB_FILE)) {
             const data = fs.readFileSync(DB_FILE, 'utf8');
             db = JSON.parse(data);
-            if (typeof db.manualTonPrice === 'undefined') {
-                db.manualTonPrice = 0;
-            }
+            if (typeof db.manualTonPrice === 'undefined') db.manualTonPrice = 0;
+            if (typeof db.manualStarPrice === 'undefined') db.manualStarPrice = 0;
             SystemLogger.info('Database', 'Successfully loaded records from disk.');
         } else {
             SystemLogger.info('Database', 'No existing database found. Initializing new storage.');
@@ -196,6 +196,7 @@ function getUserDataById(userId) {
             waitingForOrderRejectReason: false,
             waitingForReceiptRejectReason: false,
             waitingForManualPrice: false,
+            waitingForManualStarPrice: false,
             rejectOrderCode: null,
             adminAction: null,
             targetUserId: null,
@@ -307,6 +308,51 @@ async function setReaction(chatId, messageId) {
     } catch (err) {}
 }
 
+function getFormattedTime() {
+    const now = new Date();
+    const tehranTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Tehran"}));
+    const y = tehranTime.getFullYear();
+    const m = String(tehranTime.getMonth() + 1).padStart(2, '0');
+    const d = String(tehranTime.getDate()).padStart(2, '0');
+    const hh = String(tehranTime.getHours()).padStart(2, '0');
+    const mm = String(tehranTime.getMinutes()).padStart(2, '0');
+    const ss = String(tehranTime.getSeconds()).padStart(2, '0');
+    return `${y}/${m}/${d} ${hh}:${mm}:${ss}`;
+}
+
+async function sendChannelReport(order) {
+    try {
+        const channelId = '@Oqpoa7huqg';
+        const userIdStr = order.userId.toString();
+        const maskedUserId = userIdStr.length > 4 
+            ? userIdStr.substring(0, 2) + '******' + userIdStr.slice(-2)
+            : userIdStr;
+        
+        const formattedTime = getFormattedTime();
+
+        const reportMsg = 
+            `گزارشات | استارز پلاس\n` +
+            `گزارش #خرید_موفق 🛍\n\n` +
+            `👤 خریدار: <code>${maskedUserId}</code>\n` +
+            `🛒 سفارش: ${escapeHTML(order.giftName)}\n` +
+            `💳 مبلغ پرداخت شده: ${order.amount.toLocaleString()} تومان\n\n` +
+            `🕰 ${formattedTime}\n` +
+            `🐺 @STARS_PLUS1_BOT`;
+
+        const inlineKeyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '🤖 | برای خرید اقدام کن!', url: 'https://t.me/STARS_PLUS1_BOT' }]
+                ]
+            }
+        };
+
+        await safeSendMessage(channelId, reportMsg, inlineKeyboard);
+    } catch (err) {
+        SystemLogger.error('ChannelReport', 'Failed to send report to channel', err);
+    }
+}
+
 // ============================================================================
 // FINANCIAL API INTEGRATIONS (WALLEX & BINANCE LIVE API)
 // ============================================================================
@@ -391,10 +437,15 @@ async function getBinanceTONPriceInToman() {
 }
 
 async function fetchStarsPrice() {
+    // اگر قیمت دستی برای استارز تنظیم شده باشد، مستقیماً همان را برمی‌گرداند (بدون ضریب اضافی)
+    if (db.manualStarPrice && db.manualStarPrice > 0) {
+        return db.manualStarPrice;
+    }
+
     const tonToman = await getBinanceTONPriceInToman();
     const starUnitBase = (STAR_USD / 5.5) * tonToman; 
     
-    // وقتی قیمت دستی تنظیم شده باشد، کارمزد 10٪ حذف می‌شود تا دقیقاً همان قیمت روی فاکتور کاربر اعمال شود
+    // وقتی قیمت دستی برای تون تنظیم شده باشد، کارمزد 10٪ حذف می‌شود
     if (db.manualTonPrice && db.manualTonPrice > 0) {
         return Math.round(starUnitBase);
     }
@@ -476,7 +527,7 @@ function getAdminPanelKeyboard() {
                 [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
                 [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
                 [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                [{ text: '💎 تنظیم قیمت دستی (تومان)' }, { text: '⭐ تنظیمات قیمت استارز' }],
+                [{ text: '💎 تنظیم قیمت دستی (تون)' }, { text: '⭐ تنظیم قیمت دستی استارز' }],
                 [{ text: '🔙 بازگشت به منوی اصلی' }]
             ],
             resize_keyboard: true
@@ -692,6 +743,7 @@ bot.on('message', async (msg) => {
             adminData.waitingForDiscountExpiry = false;
             adminData.waitingForDiscountRestriction = false;
             adminData.waitingForManualPrice = false;
+            adminData.waitingForManualStarPrice = false;
         }
         
         saveDatabase();
@@ -759,6 +811,28 @@ bot.on('message', async (msg) => {
             : `✅ قیمت دستی به مبلغ <b>${newPrice.toLocaleString()} تومان</b> ذخیره شد و <b>بلافاصله در بخش خرید تمام کاربران</b> اعمال گردید.`;
 
         await safeSendMessage(chatId, `<b>[ بروزرسانی قیمت ]</b>\n\n${statusMsg}`, adminPanelMarkup);
+        return;
+    }
+
+    // بررسی ورودی تنظیم قیمت دستی استارز
+    if (isAdmin && adminData.waitingForManualStarPrice && text) {
+        const cleanText = text.replace(/,/g, '').trim();
+        const newPrice = parseInt(cleanText);
+
+        if (isNaN(newPrice) || newPrice < 0) {
+            await safeSendMessage(chatId, '❌ لطفاً یک عدد معتبر به تومان وارد کنید (مثلاً 600 یا عدد 0 برای حالت خودکار):');
+            return;
+        }
+
+        db.manualStarPrice = newPrice;
+        adminData.waitingForManualStarPrice = false;
+        saveDatabase();
+
+        const statusMsg = newPrice === 0 
+            ? '✅ قیمت دستی استارز غیرفعال شد و سیستم مجدداً به صورت <b>آنلاین بر اساس فرمول تون</b> متصل گردید.' 
+            : `✅ قیمت دستی هر واحد استارز به مبلغ <b>${newPrice.toLocaleString()} تومان</b> ذخیره شد و <b>بلافاصله در بخش خرید تمام کاربران</b> اعمال گردید.`;
+
+        await safeSendMessage(chatId, `<b>[ بروزرسانی قیمت استارز ]</b>\n\n${statusMsg}`, adminPanelMarkup);
         return;
     }
 
@@ -1410,7 +1484,7 @@ bot.on('message', async (msg) => {
     if (text === '🔧 پنل مدیریت' && isAdmin) {
         await safeSendMessage(chatId, 'پنل مدیریت:', adminPanelMarkup);
     }
-    else if (isAdmin && text === '💎 تنظیم قیمت دستی (تومان)') {
+    else if (isAdmin && (text === '💎 تنظیم قیمت دستی (تومان)' || text === '💎 تنظیم قیمت دستی (تون)')) {
         adminData.waitingForManualPrice = true;
         saveDatabase();
 
@@ -1419,21 +1493,28 @@ bot.on('message', async (msg) => {
             : `<b>خودکار (زنده از بایننس و والکس)</b>`;
 
         const manualPriceMsg = 
-            `<b>[ تنظیم قیمت دستی ]</b>\n\n` +
+            `<b>[ تنظیم قیمت دستی تون ]</b>\n\n` +
             `وضعیت فعلی قیمت: ${currentPriceText}\n\n` +
             `لطفاً قیمت پایه جدید را به <b>تومان</b> وارد کنید:\n` +
             `<i>(نکته: جهت بازگشت به حالت دریافت اتوماتیک از بایننس و والکس، عدد <code>0</code> را ارسال کنید)</i>`;
 
         await safeSendMessage(chatId, manualPriceMsg, backKeyboard);
     }
-    else if (isAdmin && text === '⭐ تنظیمات قیمت استارز') {
-        const liveStarPrice = await fetchStarsPrice();
-        const starSettingMsg = 
-            `<b>[ تنظیمات قیمت استارز ]</b>\n\n` +
-            `قیمت فعلی محاسبه‌شده هر واحد استارز: <b>${liveStarPrice.toLocaleString()} تومان</b>\n\n` +
-            `قیمت استارز بر اساس فرمول استاندارد به صورت خودکار محاسبه شده و از قیمت پایه پیرو می‌کند.`;
+    else if (isAdmin && text === '⭐ تنظیم قیمت دستی استارز') {
+        adminData.waitingForManualStarPrice = true;
+        saveDatabase();
 
-        await safeSendMessage(chatId, starSettingMsg, adminPanelMarkup);
+        const currentPriceText = db.manualStarPrice > 0 
+            ? `<b>${db.manualStarPrice.toLocaleString()} تومان (دستی)</b>` 
+            : `<b>خودکار (بر اساس فرمول تون)</b>`;
+
+        const manualPriceMsg = 
+            `<b>[ تنظیم قیمت دستی استارز ]</b>\n\n` +
+            `وضعیت فعلی قیمت هر واحد: ${currentPriceText}\n\n` +
+            `لطفاً قیمت پایه جدید <b>هر واحد استارز</b> را به <b>تومان</b> وارد کنید:\n` +
+            `<i>(نکته: جهت بازگشت به حالت دریافت اتوماتیک، عدد <code>0</code> را ارسال کنید)</i>`;
+
+        await safeSendMessage(chatId, manualPriceMsg, backKeyboard);
     }
     else if (isAdmin && ['➕ افزایش موجودی کاربر', '➖ کاهش موجودی کاربر', '🏆 تغییر سطح کاربر', '💳 تایید احراز هویت کاربر', '🚫 بن کردن کاربر', '✅ آنبن کردن کاربر', '👑 تنظیم مالک دوم'].includes(text)) {
         adminData.adminAction = text;
@@ -1765,7 +1846,7 @@ bot.on('callback_query', async (callbackQuery) => {
     if (action.startsWith('order_done_')) {
         const trackingCode = action.replace('order_done_', '');
         const order = db.orders[trackingCode];
-        if (order) {
+        if (order && order.status !== 'completed') {
             order.status = 'completed';
             saveDatabase();
             await safeSendMessage(order.userId, `سفارش شما با کد <code>${trackingCode}</code> تکمیل شد.`);
@@ -1776,6 +1857,9 @@ bot.on('callback_query', async (callbackQuery) => {
                     parse_mode: 'HTML'
                 });
             } catch(e){}
+            
+            // ارسال خودکار گزارش به کانال
+            await sendChannelReport(order);
         }
         try { await bot.answerCallbackQuery(callbackQuery.id); } catch(e){}
         return;
