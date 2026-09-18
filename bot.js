@@ -1326,8 +1326,9 @@ bot.on('message', async (msg) => {
                     [{ text: '🏆 تغییر سطح کاربر' }, { text: '💳 تایید احراز هویت کاربر' }],
                     [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
                     [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
-                ], resize_keyboard: true
+                    [{ text: '🔙 بازگشت به منوی اصلی' }]
+                ], 
+                resize_keyboard: true
             }
         };
         await safeSendMessage(chatId, 'پنل مدیریت:', adminPanelMarkup);
