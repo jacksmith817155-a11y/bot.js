@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.7 (RENDER COMPATIBLE & BINANCE LIVE SYNC)
+ * Stars Plus TELEGRAM BOT - V3.8 (RENDER COMPATIBLE & BINANCE LIVE SYNC)
  * ============================================================================
  */
 
@@ -222,7 +222,7 @@ function getUserData(msg) {
 }
 
 // ============================================================================
-// MESSAGING & UI UTILITIES (RENDER SAFE PHOTO HANDLER)
+// MESSAGING & UI UTILITIES
 // ============================================================================
 
 function escapeHTML(text) {
@@ -260,7 +260,6 @@ async function safeSendPhoto(chatId, photo, options = {}) {
             if (fs.existsSync(photo)) {
                 photoData = fs.createReadStream(photo);
             } else {
-                // اگر فایل عکس روی هاست Render وجود نداشت، به صورت امن مستقیماً متن را ارسال کن تا ارور 400 ندهد
                 return await safeSendMessage(chatId, options.caption, { reply_markup: options.reply_markup });
             }
         }
@@ -304,7 +303,7 @@ async function setReaction(chatId, messageId) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS (BINANCE LIVE API - RENDER ACCESSIBLE)
+// FINANCIAL API INTEGRATIONS (BINANCE LIVE API)
 // ============================================================================
 
 async function getBinanceTONPriceInToman() {
@@ -324,7 +323,6 @@ async function getBinanceTONPriceInToman() {
                     if (parsed && parsed.price) {
                         const tonUsdt = parseFloat(parsed.price);
                         if (!isNaN(tonUsdt) && tonUsdt > 0) {
-                            // نرخ تخمینی تتر به تومان (قابل تنظیم) یا همگام‌سازی با پایه ۳۱۱,۵۹۱ تومان
                             const estimatedUsdtToman = 56500; 
                             const calculatedToman = Math.round(tonUsdt * estimatedUsdtToman);
                             resolve(calculatedToman > 0 ? calculatedToman : FALLBACK_GRAM_TOMAN);
@@ -344,13 +342,13 @@ async function getBinanceTONPriceInToman() {
 
 async function fetchStarsPrice() {
     const tonToman = await getBinanceTONPriceInToman();
-    const starUnitBase = (STAR_USD / 5.5) * tonToman; // محاسبه قیمت استارز بر اساس ارزش تون‌کوین
-    return Math.round(starUnitBase * 1.10); // ۱۰ درصد افزایش قیمت روی فاکتور
+    const starUnitBase = (STAR_USD / 5.5) * tonToman; 
+    return Math.round(starUnitBase * 1.10); 
 }
 
 async function fetchGramData() {
     const rawBinanceBase = await getBinanceTONPriceInToman();
-    const finalPrice = Math.round(rawBinanceBase * 1.10); // ۱۰ درصد افزایش قیمت دقیق مطابق درخواست شما
+    const finalPrice = Math.round(rawBinanceBase * 1.10); 
     return { gramUsd: (rawBinanceBase / 56500).toFixed(2), finalPrice, usdtToman: rawBinanceBase };
 }
 
@@ -460,7 +458,7 @@ async function showGiftInvoice(chatId, userData) {
     const tonToman = await getBinanceTONPriceInToman();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
     const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
-    const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); // ۱۰ درصد افزایش قیمت
+    const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
     const totalPrice = Math.round(starziTomanPerUnit * userData.giftCount);
     
     let discountVal = 0;
@@ -504,7 +502,6 @@ async function showGiftInvoice(chatId, userData) {
 }
 
 async function showGramInvoice(chatId, userData) {
-    // بروزرسانی لحظه‌ای قیمت گرام از بایننس دقیقاً در لحظه ساخت فاکتور
     const freshGramData = await fetchGramData();
     userData.gramPricePerUnit = freshGramData.finalPrice;
 
@@ -1701,7 +1698,7 @@ bot.on('callback_query', async (callbackQuery) => {
                 parse_mode: 'HTML'
             });
         } catch(e){}
-        try { await bot.answerCallbackQuery(callbackQuery.id); } catch(e){}
+        try { await bot.answerCallbackQuery(callbackQuery.id);} catch(e){}
         return;
     }
 
