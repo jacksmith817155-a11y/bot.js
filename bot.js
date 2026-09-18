@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.1 (ENTERPRISE RESTRUCTURED)
+ * Stars Plus TELEGRAM BOT - V3.2 (ENTERPRISE RESTRUCTURED)
  * ============================================================================
  * Features & Architecture Upgrades:
  * - Completely modular separation of buy flows, state managers, and handlers.
@@ -45,7 +45,6 @@ const ADMIN_ID_USERNAME = '@R3EUO';
 
 /**
  * The numeric Telegram ID of the primary administrator.
- * (لطفا در صورت نیاز ایدی عددی خود را جایگزین کنید)
  */
 const ADMIN_NUMERIC_ID = 8942987641; 
 
@@ -202,6 +201,7 @@ function getUserDataById(userId) {
             recipientUsername: '',
             isHided: false,
             commentText: 'تنظیم نشده',
+            lastInvoiceMessageId: null,
             
             tonAmount: 0,
             tonPricePerUnit: 0,
@@ -255,6 +255,14 @@ function escapeHTML(text) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+async function safeDeleteMessage(chatId, messageId) {
+    try {
+        if (messageId) {
+            await bot.deleteMessage(chatId, messageId);
+        }
+    } catch (err) {}
 }
 
 async function safeSendMessage(chatId, text, options = {}) {
@@ -342,7 +350,7 @@ async function getUsdtToToman() {
 async function fetchStarsPrice() {
     const rawUsdtToman = await getUsdtToToman();
     const starToman = STAR_USD * rawUsdtToman;
-    // دقیقا ۱۰ درصد سود طبق درخواست
+    // دقیقا ۱۰ درصد سود روی قیمت استارز
     return Math.round(starToman * 1.10);
 }
 
@@ -472,14 +480,19 @@ async function showStarInvoice(chatId, userData) {
         }
     };
 
-    await safeSendPhoto(chatId, '1000002626.jpg', { caption: invoiceMsg, reply_markup: invoiceKeyboard.reply_markup });
+    await safeDeleteMessage(chatId, userData.lastInvoiceMessageId);
+    const sent = await safeSendPhoto(chatId, '1000002626.jpg', { caption: invoiceMsg, reply_markup: invoiceKeyboard.reply_markup });
+    if (sent && sent.message_id) {
+        userData.lastInvoiceMessageId = sent.message_id;
+        saveDatabase();
+    }
 }
 
 async function showGiftInvoice(chatId, userData) {
     const rawUsdtToman = await getUsdtToToman();
     const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
     const baseGiftToman = starziUsdPrice * rawUsdtToman;
-    // 10% markup
+    // ۱۰ درصد سود دقیق
     const starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
     const totalPrice = Math.round(starziTomanPerUnit * userData.giftCount);
     
@@ -515,7 +528,13 @@ async function showGiftInvoice(chatId, userData) {
             resize_keyboard: true
         }
     };
-    await safeSendMessage(chatId, invoiceMsg, invoiceKeyboard);
+
+    await safeDeleteMessage(chatId, userData.lastInvoiceMessageId);
+    const sent = await safeSendMessage(chatId, invoiceMsg, invoiceKeyboard);
+    if (sent && sent.message_id) {
+        userData.lastInvoiceMessageId = sent.message_id;
+        saveDatabase();
+    }
 }
 
 async function showTonInvoice(chatId, userData) {
@@ -541,7 +560,13 @@ async function showTonInvoice(chatId, userData) {
             resize_keyboard: true
         }
     };
-    await safeSendMessage(chatId, invoiceMsg, invoiceKeyboard);
+
+    await safeDeleteMessage(chatId, userData.lastInvoiceMessageId);
+    const sent = await safeSendMessage(chatId, invoiceMsg, invoiceKeyboard);
+    if (sent && sent.message_id) {
+        userData.lastInvoiceMessageId = sent.message_id;
+        saveDatabase();
+    }
 }
 
 // ============================================================================
@@ -573,6 +598,7 @@ bot.on('message', async (msg) => {
 
     if (text === 'لغو خرید ❌' || text === '❌ لغو خرید') {
         userData.currentShopState = null;
+        userData.lastInvoiceMessageId = null;
         saveDatabase();
         await safeSendMessage(chatId, 'خرید شما لغو شد.', mainKeyboard);
         return;
@@ -599,6 +625,7 @@ bot.on('message', async (msg) => {
         
         userData.waitingForStarCount = false;
         userData.waitingForStarRecipient = false;
+        userData.lastInvoiceMessageId = null;
         
         if (isAdmin) { 
             adminData.adminAction = null; 
@@ -1090,6 +1117,7 @@ bot.on('message', async (msg) => {
             time: now,
             status: 'pending'
         };
+        userData.lastInvoiceMessageId = null;
         saveDatabase();
 
         const userConfirmMsg = `سفارش ثبت شد و مبلغ از حساب شما کسر گردید.\n\nکد پیگیری: <code>${trackingCode}</code>\nمقدار: ${userData.starCount} استارز\nمبلغ: ${userData.lastAmount.toLocaleString()} تومان`;
@@ -1149,6 +1177,7 @@ bot.on('message', async (msg) => {
             time: now,
             status: 'pending'
         };
+        userData.lastInvoiceMessageId = null;
         saveDatabase();
 
         const userConfirmMsg = `سفارش گیفت ثبت شد و مبلغ کسر گردید.\n\nکد پیگیری: <code>${trackingCode}</code>\nمبلغ: ${userData.lastAmount.toLocaleString()} تومان`;
@@ -1211,6 +1240,7 @@ bot.on('message', async (msg) => {
             time: now,
             status: 'pending'
         };
+        userData.lastInvoiceMessageId = null;
         saveDatabase();
 
         const userConfirmMsg = `سفارش تون ثبت شد و مبلغ کسر گردید.\n\nکد پیگیری: <code>${trackingCode}</code>`;
@@ -1293,6 +1323,7 @@ bot.on('message', async (msg) => {
 
     if (text && text.startsWith('/start')) {
         userData.currentShopState = null;
+        userData.lastInvoiceMessageId = null;
         saveDatabase();
         const welcomeText = `به ربات استارز پلاس خوش آمدید ! 🌟\nمجموعه‌ای کامل برای خدمات تلگرامی شما.`;
         await safeSendPhoto(chatId, '1000002624.jpg', { caption: welcomeText, reply_markup: mainKeyboard.reply_markup });
