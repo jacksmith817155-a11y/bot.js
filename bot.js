@@ -34,7 +34,7 @@ const DB_FILE = path.join(__dirname, 'database.json');
 
 // لیست کانال‌های جوین اجباری
 const FORCE_JOIN_CHANNELS = ['@nova2_shop', '@nova1_shopp'];
-const REPORT_CHANNEL = '@nova2_shop'; // کانال ارسال گزارشات خرید
+const REPORT_CHANNEL = '@nova1_shopp'; // کانال ارسال گزارشات خرید
 
 /**
  * Fixed USD Price for single Telegram Star unit.
