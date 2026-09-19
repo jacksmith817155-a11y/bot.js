@@ -1,7 +1,7 @@
 {
-  "name": "stars-plus-bot",
+  "name": "nova-shop-bot",
   "version": "1.0.0",
-  "description": "Stars Plus Telegram Bot",
+  "description": "Nova Shop Telegram Bot",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
