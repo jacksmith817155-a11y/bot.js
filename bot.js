@@ -31,7 +31,7 @@ const TOKEN = '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54';
 const ADMIN_ID_USERNAME = '@shantiaNFT';
 const ADMIN_NUMERIC_ID = 8750484397; 
 const DB_FILE = path.join(__dirname, 'database.json');
-const FORCE_JOIN_CHANNEL = '@nova1_shopp'; // چنل گزارشات برای جوین اجباری
+const FORCE_JOIN_CHANNEL = '@nova2_shop'; // چنل گزارشات برای جوین اجباری
 
 /**
  * Fixed USD Price for single Telegram Star unit.
