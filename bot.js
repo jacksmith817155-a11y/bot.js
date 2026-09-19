@@ -31,6 +31,7 @@ const TOKEN = '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54';
 const ADMIN_ID_USERNAME = '@shantiaNFT';
 const ADMIN_NUMERIC_ID = 8750484397; 
 const DB_FILE = path.join(__dirname, 'database.json');
+const FORCE_JOIN_CHANNEL = '@nova1_shopp'; // چنل گزارشات برای جوین اجباری
 
 /**
  * Fixed USD Price for single Telegram Star unit.
@@ -322,7 +323,7 @@ function getFormattedTime() {
 
 async function sendChannelReport(order) {
     try {
-        const channelId = '@nova1_shopp';
+        const channelId = FORCE_JOIN_CHANNEL;
         const userIdStr = order.userId.toString();
         const maskedUserId = userIdStr.length > 4 
             ? userIdStr.substring(0, 2) + '******' + userIdStr.slice(-2)
@@ -350,6 +351,18 @@ async function sendChannelReport(order) {
         await safeSendMessage(channelId, reportMsg, inlineKeyboard);
     } catch (err) {
         SystemLogger.error('ChannelReport', 'Failed to send report to channel', err);
+    }
+}
+
+// ============================================================================
+// CHECK MEMBERSHIP FUNCTION (FORCE JOIN)
+// ============================================================================
+async function checkMembership(userId) {
+    try {
+        const chatMember = await bot.getChatMember(FORCE_JOIN_CHANNEL, userId);
+        return ['creator', 'administrator', 'member', 'restricted'].includes(chatMember.status);
+    } catch (e) {
+        return false;
     }
 }
 
@@ -695,6 +708,24 @@ bot.on('message', async (msg) => {
         return;
     }
 
+    // =========================================================================
+    // FORCE JOIN CHANNEL LOGIC
+    // =========================================================================
+    if (!isAdmin) {
+        const isMember = await checkMembership(msg.from.id);
+        if (!isMember) {
+            const joinMarkup = {
+                inline_keyboard: [
+                    [{ text: '📢 عضویت در کانال', url: `https://t.me/${FORCE_JOIN_CHANNEL.replace('@', '')}` }],
+                    [{ text: '✅ تایید عضویت', callback_data: 'check_join' }]
+                ]
+            };
+            await safeSendMessage(chatId, '❌ <b>برای استفاده از ربات و دریافت خدمات، ابتدا باید در کانال ما عضو شوید.</b>\n\nپس از عضویت، روی دکمه "تایید عضویت" کلیک کنید.', { reply_markup: joinMarkup });
+            return; 
+        }
+    }
+    // =========================================================================
+
     const mainKeyboard = getMainKeyboard(isAdmin);
     const backKeyboard = getBackKeyboard();
     const accountKeyboard = getAccountKeyboard();
@@ -748,14 +779,15 @@ bot.on('message', async (msg) => {
         
         saveDatabase();
 
-        if (text === '🏠 منوی اصلی' || text === '🔙 بازگشت به منوی اصلی' || !userData.currentShopState || userData.currentShopState === 'main_shop') {
+        // فیکس دکمه برگشت: اگر کاربر در بخش استارز روی برگشت زد، مستقیماً به صفحه اصلی (منوی اصلی) برگردد
+        if (text === '🏠 منوی اصلی' || text === '🔙 بازگشت به منوی اصلی' || !userData.currentShopState || userData.currentShopState === 'main_shop' || userData.currentShopState === 'star_menu') {
             userData.currentShopState = null;
             saveDatabase();
             await safeSendMessage(chatId, 'به منوی اصلی برگشتید.', mainKeyboard);
             return;
         }
 
-        if (text === '🔙 بازگشت به پکیج‌ها' || userData.currentShopState === 'star_recipient' || userData.currentShopState === 'star_invoice' || userData.currentShopState === 'star_menu') {
+        if (text === '🔙 بازگشت به پکیج‌ها' || userData.currentShopState === 'star_recipient' || userData.currentShopState === 'star_invoice') {
             userData.currentShopState = 'star_menu';
             userData.waitingForStarCount = true;
             saveDatabase();
@@ -1811,6 +1843,34 @@ bot.on('callback_query', async (callbackQuery) => {
     const msg = callbackQuery.message;
     const chatId = msg.chat.id;
     const userData = getUserDataById(chatId);
+
+    // =========================================================================
+    // FORCE JOIN VERIFICATION 
+    // =========================================================================
+    if (action === 'check_join') {
+        const isMember = await checkMembership(callbackQuery.from.id);
+        if (isMember) {
+            await safeDeleteMessage(chatId, msg.message_id);
+            await safeSendMessage(chatId, '✅ عضویت شما تایید شد! حالا می‌توانید از ربات استفاده کنید.', getMainKeyboard(false));
+        } else {
+            try {
+                await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ شما هنوز در کانال عضو نشده‌اید!', show_alert: true });
+            } catch(e) {}
+        }
+        return;
+    }
+
+    const isAdmin = (chatId.toString() === ADMIN_NUMERIC_ID.toString() || (db.secondaryAdmin && chatId.toString() === db.secondaryAdmin.toString()));
+    if (!isAdmin) {
+        const isMember = await checkMembership(callbackQuery.from.id);
+        if (!isMember) {
+            try {
+                await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ لطفاً ابتدا در کانال عضو شوید!', show_alert: true });
+            } catch(e) {}
+            return;
+        }
+    }
+    // =========================================================================
 
     if (action.startsWith('add_balance_')) {
         const shortage = parseInt(action.replace('add_balance_', ''));
