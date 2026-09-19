@@ -27,9 +27,9 @@ server.listen(PORT, () => {
 // ENTERPRISE CONFIGURATION & CONSTANTS
 // ============================================================================
 
-const TOKEN = '8696660217:AAEBI6iOD-OAZpWbCIGy2KU-s-Fc5OQwwVE';
-const ADMIN_ID_USERNAME = '@R3EUO';
-const ADMIN_NUMERIC_ID = 8942987641; 
+const TOKEN = '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54';
+const ADMIN_ID_USERNAME = '@shantiaNFT';
+const ADMIN_NUMERIC_ID = 8750484397; 
 const DB_FILE = path.join(__dirname, 'database.json');
 
 /**
@@ -135,7 +135,7 @@ function saveDatabase() {
 }
 
 loadDatabase();
-SystemLogger.info('System', 'Stars Plus Bot is running!');
+SystemLogger.info('System', 'Nova Shop Bot is running!');
 
 // ============================================================================
 // USER STATE MACHINE & DATA MANAGEMENT
@@ -322,7 +322,7 @@ function getFormattedTime() {
 
 async function sendChannelReport(order) {
     try {
-        const channelId = '@Oqpoa7huqg';
+        const channelId = '@nova1_shopp';
         const userIdStr = order.userId.toString();
         const maskedUserId = userIdStr.length > 4 
             ? userIdStr.substring(0, 2) + '******' + userIdStr.slice(-2)
@@ -331,18 +331,18 @@ async function sendChannelReport(order) {
         const formattedTime = getFormattedTime();
 
         const reportMsg = 
-            `گزارشات | استارز پلاس\n` +
+            `گزارشات | نوا شاپ\n` +
             `گزارش #خرید_موفق 🛍\n\n` +
             `👤 خریدار: <code>${maskedUserId}</code>\n` +
             `🛒 سفارش: ${escapeHTML(order.giftName)}\n` +
             `💳 مبلغ پرداخت شده: ${order.amount.toLocaleString()} تومان\n\n` +
             `🕰 ${formattedTime}\n` +
-            `🐺 @STARS_PLUS1_BOT`;
+            `🐺 @NOVA_SHOP3_BOT`;
 
         const inlineKeyboard = {
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: '🤖 | برای خرید اقدام کن!', url: 'https://t.me/STARS_PLUS1_BOT' }]
+                    [{ text: '🤖 | برای خرید اقدام کن!', url: 'https://t.me/NOVA_SHOP3_BOT' }]
                 ]
             }
         };
@@ -1476,7 +1476,7 @@ bot.on('message', async (msg) => {
         userData.currentShopState = null;
         userData.lastInvoiceMessageId = null;
         saveDatabase();
-        const welcomeText = `به ربات استارز پلاس خوش آمدید ! 🌟\nمجموعه‌ای کامل برای خدمات تلگرامی شما.`;
+        const welcomeText = `به ربات نوا شاپ خوش آمدید ! 🌟\nمجموعه‌ای کامل برای خدمات تلگرامی شما.`;
         await safeSendPhoto(chatId, '1000002624.jpg', { caption: welcomeText, reply_markup: mainKeyboard.reply_markup });
         return;
     } 
@@ -1712,7 +1712,7 @@ bot.on('message', async (msg) => {
         await safeSendMessage(chatId, 'کامنت دلخواه خود را بفرستید:', backKeyboard);
     }
     else if (text === '❤️ چطوری میتوانم به شما اعتماد کنم') {
-        const trustMsg = `استارز پلاس با رضایت هزاران مشتری فعال در خدمت شماست.\n\nکانال اعتماد:\n@snt_shopp`;
+        const trustMsg = `نوا شاپ با رضایت هزاران مشتری فعال در خدمت شماست.\n\nکانال اعتماد:\n@snt_shopp`;
         await safeSendMessage(chatId, trustMsg, backKeyboard);
     }
     else if (text === '📦 پیگیری سفارش') {
@@ -1748,7 +1748,7 @@ bot.on('message', async (msg) => {
         userData.waitingForReceipt = true;
         saveDatabase();
         
-        const cardPaymentMsg = `مبلغ: ${userData.lastAmount.toLocaleString()} تومان\n\nبه شماره کارت زیر واریز کنید:\n<code>5555555555555555</code>\nبه نام: تست\n\nسپس عکس رسید را ارسال کنید.`;
+        const cardPaymentMsg = `مبلغ: ${userData.lastAmount.toLocaleString()} تومان\n\nبه شماره کارت زیر واریز کنید:\n<code>6219861452862914</code>\nبه نام: شنتیا زاهدپور\n\nسپس عکس رسید را ارسال کنید.`;
         const paymentKeyboard = {
             reply_markup: {
                 inline_keyboard: [[{ text: '🏷️ اعمال کد تخفیف', callback_data: 'apply_discount_prompt' }]],
@@ -1819,7 +1819,7 @@ bot.on('callback_query', async (callbackQuery) => {
         userData.waitingForReceipt = true;
         saveDatabase();
         
-        const cardPaymentMsg = `مبلغ: ${shortage.toLocaleString()} تومان\n\nبه شماره کارت زیر واریز کنید:\n<code>5555555555555555</code>\nبه نام: تست\n\nسپس عکس رسید را ارسال کنید.`;
+        const cardPaymentMsg = `مبلغ: ${shortage.toLocaleString()} تومان\n\nبه شماره کارت زیر واریز کنید:\n<code>6219861452862914</code>\nبه نام: شنتیا زاهدپور\n\nسپس عکس رسید را ارسال کنید.`;
         const paymentKeyboard = {
             reply_markup: {
                 inline_keyboard: [[{ text: '🏷️ اعمال کد تخفیف', callback_data: 'apply_discount_prompt' }]],
