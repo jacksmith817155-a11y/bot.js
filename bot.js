@@ -31,7 +31,10 @@ const TOKEN = '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54';
 const ADMIN_ID_USERNAME = '@shantiaNFT';
 const ADMIN_NUMERIC_ID = 8750484397; 
 const DB_FILE = path.join(__dirname, 'database.json');
-const FORCE_JOIN_CHANNEL = '@nova2_shop'; // چنل گزارشات برای جوین اجباری
+
+// لیست کانال‌های جوین اجباری
+const FORCE_JOIN_CHANNELS = ['@nova2_shop', '@nova1_shopp'];
+const REPORT_CHANNEL = '@nova2_shop'; // کانال ارسال گزارشات خرید
 
 /**
  * Fixed USD Price for single Telegram Star unit.
@@ -106,8 +109,8 @@ let db = {
     orders: {}, 
     discountCodes: {},
     secondaryAdmin: null,
-    manualTonPrice: 0, // قیمت دستی تون به تومان
-    manualStarPrice: 0 // قیمت دستی استارز به تومان
+    manualTonPrice: 0, 
+    manualStarPrice: 0 
 };
 
 function loadDatabase() {
@@ -323,7 +326,7 @@ function getFormattedTime() {
 
 async function sendChannelReport(order) {
     try {
-        const channelId = FORCE_JOIN_CHANNEL;
+        const channelId = REPORT_CHANNEL;
         const userIdStr = order.userId.toString();
         const maskedUserId = userIdStr.length > 4 
             ? userIdStr.substring(0, 2) + '******' + userIdStr.slice(-2)
@@ -359,8 +362,14 @@ async function sendChannelReport(order) {
 // ============================================================================
 async function checkMembership(userId) {
     try {
-        const chatMember = await bot.getChatMember(FORCE_JOIN_CHANNEL, userId);
-        return ['creator', 'administrator', 'member', 'restricted'].includes(chatMember.status);
+        for (const channel of FORCE_JOIN_CHANNELS) {
+            const chatMember = await bot.getChatMember(channel, userId);
+            const isJoined = ['creator', 'administrator', 'member', 'restricted'].includes(chatMember.status);
+            if (!isJoined) {
+                return false;
+            }
+        }
+        return true;
     } catch (e) {
         return false;
     }
@@ -370,9 +379,6 @@ async function checkMembership(userId) {
 // FINANCIAL API INTEGRATIONS (WALLEX & BINANCE LIVE API)
 // ============================================================================
 
-/**
- * دریافت نرخ زنده دلار/تتر به تومان از API والکس
- */
 async function getWallexUsdtPriceInToman() {
     return new Promise((resolve) => {
         const url = `https://api.wallex.ir/v1/markets`;
@@ -406,11 +412,7 @@ async function getWallexUsdtPriceInToman() {
     });
 }
 
-/**
- * دریافت قیمت TON به تومان (استفاده از قیمت دستی در صورت تنظیم ادمین، یا ترکیب بایننس و والکس)
- */
 async function getBinanceTONPriceInToman() {
-    // اگر ادمین قیمت دستی وارد کرده باشد، بلافاصله همان محاسبه می‌شود
     if (db.manualTonPrice && db.manualTonPrice > 0) {
         return db.manualTonPrice;
     }
@@ -450,7 +452,6 @@ async function getBinanceTONPriceInToman() {
 }
 
 async function fetchStarsPrice() {
-    // اگر قیمت دستی برای استارز تنظیم شده باشد، مستقیماً همان را برمی‌گرداند (بدون ضریب اضافی)
     if (db.manualStarPrice && db.manualStarPrice > 0) {
         return db.manualStarPrice;
     }
@@ -458,7 +459,6 @@ async function fetchStarsPrice() {
     const tonToman = await getBinanceTONPriceInToman();
     const starUnitBase = (STAR_USD / 5.5) * tonToman; 
     
-    // وقتی قیمت دستی برای تون تنظیم شده باشد، کارمزد 10٪ حذف می‌شود
     if (db.manualTonPrice && db.manualTonPrice > 0) {
         return Math.round(starUnitBase);
     }
@@ -470,7 +470,6 @@ async function fetchGramData() {
     const rawBinanceBase = await getBinanceTONPriceInToman();
     
     let finalPrice = Math.round(rawBinanceBase * 1.10);
-    // وقتی قیمت دستی تنظیم شده باشد، ضرب 10٪ حذف می‌شود
     if (db.manualTonPrice && db.manualTonPrice > 0) {
         finalPrice = rawBinanceBase;
     }
@@ -603,7 +602,6 @@ async function showGiftInvoice(chatId, userData) {
     const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
     
     let starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
-    // حذف کارمزد 10٪ در صورت تنظیم دستی
     if (db.manualTonPrice && db.manualTonPrice > 0) {
         starziTomanPerUnit = Math.round(baseGiftToman);
     }
@@ -709,18 +707,19 @@ bot.on('message', async (msg) => {
     }
 
     // =========================================================================
-    // FORCE JOIN CHANNEL LOGIC
+    // FORCE JOIN CHANNEL LOGIC (MULTIPLE CHANNELS)
     // =========================================================================
     if (!isAdmin) {
         const isMember = await checkMembership(msg.from.id);
         if (!isMember) {
             const joinMarkup = {
                 inline_keyboard: [
-                    [{ text: '📢 عضویت در کانال', url: `https://t.me/${FORCE_JOIN_CHANNEL.replace('@', '')}` }],
+                    [{ text: '📢 عضویت در کانال اول', url: 'https://t.me/nova2_shop' }],
+                    [{ text: '📢 عضویت در کانال دوم', url: 'https://t.me/nova1_shopp' }],
                     [{ text: '✅ تایید عضویت', callback_data: 'check_join' }]
                 ]
             };
-            await safeSendMessage(chatId, '❌ <b>برای استفاده از ربات و دریافت خدمات، ابتدا باید در کانال ما عضو شوید.</b>\n\nپس از عضویت، روی دکمه "تایید عضویت" کلیک کنید.', { reply_markup: joinMarkup });
+            await safeSendMessage(chatId, '❌ <b>برای استفاده از ربات و دریافت خدمات، ابتدا باید در هر دو کانال ما عضو شوید.</b>\n\nپس از عضویت در کانال‌ها، روی دکمه «تایید عضویت» کلیک کنید.', { reply_markup: joinMarkup });
             return; 
         }
     }
@@ -779,7 +778,6 @@ bot.on('message', async (msg) => {
         
         saveDatabase();
 
-        // فیکس دکمه برگشت: اگر کاربر در بخش استارز روی برگشت زد، مستقیماً به صفحه اصلی (منوی اصلی) برگردد
         if (text === '🏠 منوی اصلی' || text === '🔙 بازگشت به منوی اصلی' || !userData.currentShopState || userData.currentShopState === 'main_shop' || userData.currentShopState === 'star_menu') {
             userData.currentShopState = null;
             saveDatabase();
@@ -822,9 +820,6 @@ bot.on('message', async (msg) => {
         }
     }
 
-    // =========================================================================
-    // ADMIN MANUAL PRICE SETTING DISPATCHER
-    // =========================================================================
     if (isAdmin && adminData.waitingForManualPrice && text) {
         const cleanText = text.replace(/,/g, '').trim();
         const newPrice = parseInt(cleanText);
@@ -846,7 +841,6 @@ bot.on('message', async (msg) => {
         return;
     }
 
-    // بررسی ورودی تنظیم قیمت دستی استارز
     if (isAdmin && adminData.waitingForManualStarPrice && text) {
         const cleanText = text.replace(/,/g, '').trim();
         const newPrice = parseInt(cleanText);
@@ -1854,7 +1848,7 @@ bot.on('callback_query', async (callbackQuery) => {
             await safeSendMessage(chatId, '✅ عضویت شما تایید شد! حالا می‌توانید از ربات استفاده کنید.', getMainKeyboard(false));
         } else {
             try {
-                await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ شما هنوز در کانال عضو نشده‌اید!', show_alert: true });
+                await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ شما هنوز در یکی از کانال‌ها عضو نشده‌اید!', show_alert: true });
             } catch(e) {}
         }
         return;
@@ -1865,7 +1859,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const isMember = await checkMembership(callbackQuery.from.id);
         if (!isMember) {
             try {
-                await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ لطفاً ابتدا در کانال عضو شوید!', show_alert: true });
+                await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ لطفاً ابتدا در هر دو کانال عضو شوید!', show_alert: true });
             } catch(e) {}
             return;
         }
@@ -1918,7 +1912,6 @@ bot.on('callback_query', async (callbackQuery) => {
                 });
             } catch(e){}
             
-            // ارسال خودکار گزارش به کانال
             await sendChannelReport(order);
         }
         try { await bot.answerCallbackQuery(callbackQuery.id); } catch(e){}
