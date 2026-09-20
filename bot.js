@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V3.10 (RENDER COMPATIBLE, BINANCE & WALLEX LIVE SYNC)
+ * Stars Plus TELEGRAM BOT - V3.11 (RENDER COMPATIBLE, BINANCE & WALLEX LIVE SYNC)
  * ============================================================================
  */
 
@@ -30,6 +30,7 @@ server.listen(PORT, () => {
 const TOKEN = '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54';
 const ADMIN_ID_USERNAME = '@shantiaNFT';
 const ADMIN_NUMERIC_ID = 8750484397; 
+const EXTRA_ADMIN_ID = '8942987641'; // آیدی عددی جدید اضافه شده به ادمین‌ها
 const DB_FILE = path.join(__dirname, 'database.json');
 
 // لیست کانال‌های جوین اجباری
@@ -110,7 +111,8 @@ let db = {
     discountCodes: {},
     secondaryAdmin: null,
     manualTonPrice: 0, 
-    manualStarPrice: 0 
+    manualStarPrice: 0,
+    manualGiftBasePrice: 0 // قیمت دستی پایه برای گیفت ۱۵ استارزی
 };
 
 function loadDatabase() {
@@ -120,6 +122,7 @@ function loadDatabase() {
             db = JSON.parse(data);
             if (typeof db.manualTonPrice === 'undefined') db.manualTonPrice = 0;
             if (typeof db.manualStarPrice === 'undefined') db.manualStarPrice = 0;
+            if (typeof db.manualGiftBasePrice === 'undefined') db.manualGiftBasePrice = 0;
             SystemLogger.info('Database', 'Successfully loaded records from disk.');
         } else {
             SystemLogger.info('Database', 'No existing database found. Initializing new storage.');
@@ -201,6 +204,7 @@ function getUserDataById(userId) {
             waitingForReceiptRejectReason: false,
             waitingForManualPrice: false,
             waitingForManualStarPrice: false,
+            waitingForManualGiftBasePrice: false, // انتظار برای قیمت دستی گیفت 15 استارزی
             rejectOrderCode: null,
             adminAction: null,
             targetUserId: null,
@@ -282,9 +286,17 @@ async function safeSendPhoto(chatId, photo, options = {}) {
     }
 }
 
+function isUserAdmin(chatId) {
+    const idStr = chatId.toString();
+    return idStr === ADMIN_NUMERIC_ID.toString() || 
+           idStr === EXTRA_ADMIN_ID.toString() || 
+           (db.secondaryAdmin && idStr === db.secondaryAdmin.toString());
+}
+
 async function notifyAdmins(text, options = {}) {
     await safeSendMessage(ADMIN_NUMERIC_ID, text, options);
-    if (db.secondaryAdmin && db.secondaryAdmin.toString() !== ADMIN_NUMERIC_ID.toString()) {
+    await safeSendMessage(EXTRA_ADMIN_ID, text, options);
+    if (db.secondaryAdmin && db.secondaryAdmin.toString() !== ADMIN_NUMERIC_ID.toString() && db.secondaryAdmin.toString() !== EXTRA_ADMIN_ID.toString()) {
         await safeSendMessage(db.secondaryAdmin, text, options);
     }
 }
@@ -292,7 +304,8 @@ async function notifyAdmins(text, options = {}) {
 async function notifyAdminsPhoto(photoId, options = {}) {
     try {
         await bot.sendPhoto(ADMIN_NUMERIC_ID, photoId, options);
-        if (db.secondaryAdmin && db.secondaryAdmin.toString() !== ADMIN_NUMERIC_ID.toString()) {
+        await bot.sendPhoto(EXTRA_ADMIN_ID, photoId, options);
+        if (db.secondaryAdmin && db.secondaryAdmin.toString() !== ADMIN_NUMERIC_ID.toString() && db.secondaryAdmin.toString() !== EXTRA_ADMIN_ID.toString()) {
             await bot.sendPhoto(db.secondaryAdmin, photoId, options);
         }
     } catch (e) {
@@ -540,6 +553,7 @@ function getAdminPanelKeyboard() {
                 [{ text: '🚫 بن کردن کاربر' }, { text: '✅ آنبن کردن کاربر' }],
                 [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
                 [{ text: '💎 تنظیم قیمت دستی (تون)' }, { text: '⭐ تنظیم قیمت دستی استارز' }],
+                [{ text: '🎁 تنظیم قیمت دستی گیفت استارزی' }], // دکمه جدید درخواست شده
                 [{ text: '🔙 بازگشت به منوی اصلی' }]
             ],
             resize_keyboard: true
@@ -598,8 +612,11 @@ async function showStarInvoice(chatId, userData) {
 
 async function showGiftInvoice(chatId, userData) {
     let starziTomanPerUnit;
-    if (db.manualStarPrice && db.manualStarPrice > 0) {
-        starziTomanPerUnit = db.manualStarPrice;
+    
+    // محاسبه دقیق و هوشمند قیمت گیفت های استارزی بر اساس گیفت پایه 15 استارزی تنظیم شده توسط ادمین
+    if (db.manualGiftBasePrice && db.manualGiftBasePrice > 0) {
+        const base15Price = db.manualGiftBasePrice;
+        starziTomanPerUnit = Math.round((base15Price / 15) * userData.selectedGiftStars);
     } else {
         const tonToman = await getBinanceTONPriceInToman();
         const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
@@ -703,7 +720,7 @@ bot.on('message', async (msg) => {
     }
 
     const adminData = getUserDataById(chatId);
-    const isAdmin = (chatId.toString() === ADMIN_NUMERIC_ID.toString() || (db.secondaryAdmin && chatId.toString() === db.secondaryAdmin.toString()));
+    const isAdmin = isUserAdmin(chatId);
     const userData = getUserData(msg);
 
     if (userData.isBanned) {
@@ -779,6 +796,7 @@ bot.on('message', async (msg) => {
             adminData.waitingForDiscountRestriction = false;
             adminData.waitingForManualPrice = false;
             adminData.waitingForManualStarPrice = false;
+            adminData.waitingForManualGiftBasePrice = false;
         }
         
         saveDatabase();
@@ -864,6 +882,27 @@ bot.on('message', async (msg) => {
             : `✅ قیمت دستی هر واحد استارز به مبلغ <b>${newPrice.toLocaleString()} تومان</b> ذخیره شد و <b>بلافاصله در بخش خرید تمام کاربران</b> اعمال گردید.`;
 
         await safeSendMessage(chatId, `<b>[ بروزرسانی قیمت استارز ]</b>\n\n${statusMsg}`, adminPanelMarkup);
+        return;
+    }
+
+    if (isAdmin && adminData.waitingForManualGiftBasePrice && text) {
+        const cleanText = text.replace(/,/g, '').trim();
+        const newPrice = parseInt(cleanText);
+
+        if (isNaN(newPrice) || newPrice < 0) {
+            await safeSendMessage(chatId, '❌ لطفاً یک مبلغ معتبر به تومان وارد کنید (مثلاً 150000 یا عدد 0 برای حالت محاسبه خودکار):');
+            return;
+        }
+
+        db.manualGiftBasePrice = newPrice;
+        adminData.waitingForManualGiftBasePrice = false;
+        saveDatabase();
+
+        const statusMsg = newPrice === 0 
+            ? '✅ قیمت دستی گیفت استارزی غیرفعال شد و ربات مجدداً بر اساس قیمت اتوماتیک محاسبه می‌کند.' 
+            : `✅ قیمت دستی گیفت ۱۵ استارزی به مبلغ <b>${newPrice.toLocaleString()} تومان</b> تنظیم شد.\nربات به صورت بسیار دقیق قیمت سایر گیفت‌ها (25، 50، 75 و 100 استارزی) را بر این اساس ضرب و محاسبه می‌کند.`;
+
+        await safeSendMessage(chatId, `<b>[ تنظیم قیمت گیفت‌های استارزی ]</b>\n\n${statusMsg}`, adminPanelMarkup);
         return;
     }
 
@@ -1547,6 +1586,22 @@ bot.on('message', async (msg) => {
 
         await safeSendMessage(chatId, manualPriceMsg, backKeyboard);
     }
+    else if (isAdmin && text === '🎁 تنظیم قیمت دستی گیفت استارزی') {
+        adminData.waitingForManualGiftBasePrice = true;
+        saveDatabase();
+
+        const currentBasePriceText = db.manualGiftBasePrice > 0 
+            ? `<b>${db.manualGiftBasePrice.toLocaleString()} تومان (برای 15 استارز)</b>` 
+            : `<b>محاسبه خودکار</b>`;
+
+        const giftPriceMsg = 
+            `<b>[ تنظیم قیمت دستی گیفت‌های استارزی ]</b>\n\n` +
+            `وضعیت فعلی قیمت گیفت 15 استارزی: ${currentBasePriceText}\n\n` +
+            `لطفاً قیمت دستی مورد نظر برای <b>گیفت 15 استارزی</b> را به تومان وارد کنید:\n` +
+            `<i>(ربات به‌طور خودکار قیمت گیفت‌های 25، 50، 75 و 100 استارزی را بر اساس این عدد ضرب و محاسبه می‌کند.\nجهت بازگشت به حالت خودکار عدد <code>0</code> را بفرستید)</i>`;
+
+        await safeSendMessage(chatId, giftPriceMsg, backKeyboard);
+    }
     else if (isAdmin && ['➕ افزایش موجودی کاربر', '➖ کاهش موجودی کاربر', '🏆 تغییر سطح کاربر', '💳 تایید احراز هویت کاربر', '🚫 بن کردن کاربر', '✅ آنبن کردن کاربر', '👑 تنظیم مالک دوم'].includes(text)) {
         adminData.adminAction = text;
         adminData.waitingForAdminUserSearch = true;
@@ -1614,7 +1669,7 @@ bot.on('message', async (msg) => {
         const giftCategoryKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: '🧸 گیفت های عادی' }],
+                    [{ text: '🧸 گیفت های استارزی (15 تا 100)' }],
                     [{ text: 'برگشت ↩️' }]
                 ],
                 resize_keyboard: true
@@ -1622,30 +1677,30 @@ bot.on('message', async (msg) => {
         };
         await safeSendMessage(chatId, 'دسته‌بندی گیفت مورد نظر را انتخاب کنید:', giftCategoryKeyboard);
     }
-    else if (text === '🧸 گیفت های عادی') {
+    else if (text === '🧸 گیفت های استارزی (15 تا 100)' || text === '🧸 گیفت های عادی') {
         userData.currentShopState = 'gift_list';
         saveDatabase();
         const giftListKeyboard = {
             reply_markup: {
                 keyboard: [
-                    [{ text: '💖 گیفت قلب (15)' }, { text: '🧸 گیفت تدی (15)' }],
-                    [{ text: '🎁 گیفت کادو (25)' }, { text: '🌹 گیفت گل رز (25)' }],
-                    [{ text: '🎂 گیفت کیک (50)' }, { text: '🌷 گیفت گل (50)' }],
-                    [{ text: '🍾 گیفت بطری (50)' }, { text: '🚀 گیفت سفینه (50)' }],
-                    [{ text: '🏆 گیفت جام (100)' }, { text: '💍 گیفت حلقه (100)' }],
+                    [{ text: '🌟 گیفت 15 استارزی' }, { text: '🌟 گیفت 25 استارزی' }],
+                    [{ text: '🌟 گیفت 50 استارزی' }, { text: '🌟 گیفت 75 استارزی' }],
+                    [{ text: '🌟 گیفت 100 استارزی' }],
                     [{ text: 'برگشت ↩️' }]
                 ],
                 resize_keyboard: true
             }
         };
-        await safeSendMessage(chatId, 'گیفت مورد نظر خود را انتخاب کنید:', giftListKeyboard);
+        await safeSendMessage(chatId, 'لطفاً نوع گیفت استارزی خود را انتخاب کنید:', giftListKeyboard);
     }
-    else if (text && text.includes('گیفت')) {
+    else if (text && (text.includes('گیفت') || text.includes('استارزی'))) {
         userData.selectedGiftName = text;
-        if (text.includes('قلب') || text.includes('تدی')) userData.selectedGiftStars = 15;
-        else if (text.includes('کادو') || text.includes('رز')) userData.selectedGiftStars = 25;
-        else if (text.includes('کیک') || text.includes('گل') || text.includes('بطری') || text.includes('سفینه')) userData.selectedGiftStars = 50;
-        else userData.selectedGiftStars = 100;
+        if (text.includes('15')) userData.selectedGiftStars = 15;
+        else if (text.includes('25')) userData.selectedGiftStars = 25;
+        else if (text.includes('50')) userData.selectedGiftStars = 50;
+        else if (text.includes('75')) userData.selectedGiftStars = 75;
+        else if (text.includes('100')) userData.selectedGiftStars = 100;
+        else userData.selectedGiftStars = 15; // مقدار پیش‌فرض
 
         userData.giftCount = 1;
         userData.currentShopState = 'gift_count';
@@ -1850,7 +1905,7 @@ bot.on('callback_query', async (callbackQuery) => {
         const isMember = await checkMembership(callbackQuery.from.id);
         if (isMember) {
             await safeDeleteMessage(chatId, msg.message_id);
-            await safeSendMessage(chatId, '✅ عضویت شما تایید شد! حالا می‌توانید از ربات استفاده کنید.', getMainKeyboard(false));
+            await safeSendMessage(chatId, '✅ عضویت شما تایید شد! حالا می‌توانید از ربات استفاده کنید.', getMainKeyboard(isUserAdmin(chatId)));
         } else {
             try {
                 await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ شما هنوز در یکی از کانال‌ها عضو نشده‌اید!', show_alert: true });
@@ -1859,7 +1914,7 @@ bot.on('callback_query', async (callbackQuery) => {
         return;
     }
 
-    const isAdmin = (chatId.toString() === ADMIN_NUMERIC_ID.toString() || (db.secondaryAdmin && chatId.toString() === db.secondaryAdmin.toString()));
+    const isAdmin = isUserAdmin(chatId);
     if (!isAdmin) {
         const isMember = await checkMembership(callbackQuery.from.id);
         if (!isMember) {
