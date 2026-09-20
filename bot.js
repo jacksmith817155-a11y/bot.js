@@ -34,7 +34,7 @@ const DB_FILE = path.join(__dirname, 'database.json');
 
 // لیست کانال‌های جوین اجباری
 const FORCE_JOIN_CHANNELS = ['@nova2_shop', '@nova1_shopp'];
-const REPORT_CHANNEL = '@nova1_shopp'; // کانال ارسال گزارشات خرید
+const REPORT_CHANNEL = '@nova2_shop'; // کانال ارسال گزارشات خرید
 
 /**
  * Fixed USD Price for single Telegram Star unit.
@@ -597,13 +597,18 @@ async function showStarInvoice(chatId, userData) {
 }
 
 async function showGiftInvoice(chatId, userData) {
-    const tonToman = await getBinanceTONPriceInToman();
-    const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
-    const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
-    
-    let starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
-    if (db.manualTonPrice && db.manualTonPrice > 0) {
-        starziTomanPerUnit = Math.round(baseGiftToman);
+    let starziTomanPerUnit;
+    if (db.manualStarPrice && db.manualStarPrice > 0) {
+        starziTomanPerUnit = db.manualStarPrice;
+    } else {
+        const tonToman = await getBinanceTONPriceInToman();
+        const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
+        const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
+        
+        starziTomanPerUnit = Math.round(baseGiftToman * 1.10); 
+        if (db.manualTonPrice && db.manualTonPrice > 0) {
+            starziTomanPerUnit = Math.round(baseGiftToman);
+        }
     }
     
     const totalPrice = Math.round(starziTomanPerUnit * userData.giftCount);
