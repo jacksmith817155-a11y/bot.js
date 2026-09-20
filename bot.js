@@ -34,7 +34,7 @@ const EXTRA_ADMIN_ID = '8942987641';
 const DB_FILE = path.join(__dirname, 'database.json');
 
 const FORCE_JOIN_CHANNELS = ['@nova2_shop', '@nova1_shopp'];
-const REPORT_CHANNEL = '@nova2_shop';
+const REPORT_CHANNEL = '@nova1_shopp';
 
 /**
  * Fixed USD Price for single Telegram Star unit.
