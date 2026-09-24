@@ -27,7 +27,7 @@ server.listen(PORT, () => {
 // ENTERPRISE CONFIGURATION & CONSTANTS
 // ============================================================================
 
-const TOKEN = '8696660217:AAEBI6iOD-OAZpWbCIGy2KU-s-Fc5OQwwVE';
+const TOKEN = '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54';
 const ADMIN_ID_USERNAME = '@shantiaNFT';
 const ADMIN_NUMERIC_ID = 8750484397; 
 const EXTRA_ADMIN_ID = '8942987641';
@@ -213,14 +213,7 @@ function getUserDataById(userId) {
             waitingForDiscountPercent: false,
             waitingForDiscountCapacity: false,
             waitingForDiscountExpiry: false,
-            waitingForDiscountRestriction: false,
-
-            // فیلدهای جدید برای امکانات مدیریت
-            waitingForDirectMessageUserId: false,
-            waitingForDirectMessageText: false,
-            directMessageUserId: null,
-            waitingForBroadcastMessage: false,
-            waitingForActivityUserId: false
+            waitingForDiscountRestriction: false
         };
         saveDatabase();
     }
@@ -559,7 +552,6 @@ function getAdminPanelKeyboard() {
                 [{ text: '🏷️ ساخت کد تخفیف' }, { text: '👑 تنظیم مالک دوم' }],
                 [{ text: '💎 تنظیم قیمت دستی (تون)' }, { text: '⭐ تنظیم قیمت دستی استارز' }],
                 [{ text: '🎁 تنظیم قیمت دستی گیفت استارزی' }],
-                [{ text: 'پیام همگانی' }, { text: 'نمایش فعالیت های کاربران' }],
                 [{ text: '🔙 بازگشت به منوی اصلی' }]
             ],
             resize_keyboard: true
@@ -797,12 +789,6 @@ bot.on('message', async (msg) => {
             adminData.waitingForManualPrice = false;
             adminData.waitingForManualStarPrice = false;
             adminData.waitingForManualGiftBasePrice = false;
-
-            adminData.waitingForDirectMessageUserId = false;
-            adminData.waitingForDirectMessageText = false;
-            adminData.waitingForBroadcastMessage = false;
-            adminData.waitingForActivityUserId = false;
-            adminData.directMessageUserId = null;
         }
         
         saveDatabase();
@@ -1112,95 +1098,6 @@ bot.on('message', async (msg) => {
             saveDatabase();
             return;
         }
-    }
-    
-    // بخش جدید امکانات مدیر
-    if (isAdmin && text === 'ارسال پیام به کاربر') {
-        adminData.waitingForDirectMessageUserId = true;
-        saveDatabase();
-        await safeSendMessage(chatId, 'لطفاً آیدی عددی کاربر مورد نظر را وارد کنید:', backKeyboard);
-    }
-    else if (isAdmin && adminData.waitingForDirectMessageUserId && text) {
-        adminData.directMessageUserId = text.trim();
-        adminData.waitingForDirectMessageUserId = false;
-        adminData.waitingForDirectMessageText = true;
-        saveDatabase();
-        await safeSendMessage(chatId, 'لطفاً پیام خود را برای کاربر وارد کنید:', backKeyboard);
-    }
-    else if (isAdmin && adminData.waitingForDirectMessageText && text) {
-        const targetId = adminData.directMessageUserId;
-        adminData.waitingForDirectMessageText = false;
-        adminData.directMessageUserId = null;
-        saveDatabase();
-        
-        await safeSendMessage(targetId, `پیام از طرف مدیریت:\n\n${escapeHTML(text)}`);
-        await safeSendMessage(chatId, '✅ پیام شما با موفقیت به عنوان مدیریت به کاربر ارسال شد.', getAdminPanelKeyboard());
-    }
-    else if (isAdmin && text === 'پیام همگانی') {
-        adminData.waitingForBroadcastMessage = true;
-        saveDatabase();
-        await safeSendMessage(chatId, 'لطفاً پیام خود را وارد کنید (این پیام از طرف ربات به تمامی کاربران ارسال خواهد شد):', backKeyboard);
-    }
-    else if (isAdmin && adminData.waitingForBroadcastMessage && text) {
-        adminData.waitingForBroadcastMessage = false;
-        saveDatabase();
-        
-        await safeSendMessage(chatId, 'در حال ارسال پیام همگانی... لطفاً صبور باشید.', getAdminPanelKeyboard());
-        let count = 0;
-        for (let userId in db.users) {
-            try {
-                await safeSendMessage(userId, `📢 پیام مدیریت:\n\n${escapeHTML(text)}`);
-                count++;
-            } catch (err) {}
-        }
-        await safeSendMessage(chatId, `✅ پیام همگانی شما با موفقیت به ${count} کاربر ارسال شد.`, getAdminPanelKeyboard());
-    }
-    else if (isAdmin && text === 'نمایش فعالیت های کاربران') {
-        adminData.waitingForActivityUserId = true;
-        saveDatabase();
-        await safeSendMessage(chatId, 'لطفاً آیدی عددی کاربر مورد نظر را جهت مشاهده تاریخچه فعالیت‌ها و سفارشات وارد کنید:', backKeyboard);
-    }
-    else if (isAdmin && adminData.waitingForActivityUserId && text) {
-        const targetId = text.trim();
-        adminData.waitingForActivityUserId = false;
-        saveDatabase();
-        
-        const targetUser = db.users[targetId];
-        if (!targetUser) {
-            await safeSendMessage(chatId, '❌ کاربری با این آیدی در دیتابیس یافت نشد.', getAdminPanelKeyboard());
-            return;
-        }
-
-        let userOrders = Object.entries(db.orders).filter(([code, order]) => order.userId.toString() === targetId);
-        
-        let actMsg = `<b>[ تاریخچه فعالیت کاربر ]</b>\n\n`;
-        actMsg += `👤 نام: ${escapeHTML(targetUser.firstName)}\n`;
-        actMsg += `🆔 آیدی: <code>${targetId}</code>\n`;
-        actMsg += `💰 موجودی فعلی: ${targetUser.wallet.toLocaleString()} تومان\n`;
-        actMsg += `🔰 وضعیت احراز: ${targetUser.verified}\n`;
-        actMsg += `📦 مجموع سفارشات ثبت شده: ${userOrders.length}\n\n`;
-        actMsg += `<b>لیست سفارشات اخیر:</b>\n`;
-        
-        if (userOrders.length > 0) {
-            userOrders.slice(-15).forEach(([code, order]) => {
-                let statusStr = 'نامشخص';
-                if (order.status === 'pending') statusStr = 'در حال بررسی ⏳';
-                else if (order.status === 'completed') statusStr = 'تایید شده و تکمیل ✅';
-                else if (order.status === 'rejected') statusStr = 'رد شده ❌';
-                
-                actMsg += `➖ <b>محصول:</b> ${escapeHTML(order.giftName)}\n`;
-                actMsg += `مبلغ: ${order.amount.toLocaleString()} تومان\n`;
-                actMsg += `زمان: ${order.time}\n`;
-                actMsg += `وضعیت: ${statusStr}\n`;
-                actMsg += `کد پیگیری: <code>${code}</code>\n\n`;
-            });
-        } else {
-            actMsg += `هیچ سفارشی برای این کاربر ثبت نشده است.\n`;
-        }
-        
-        actMsg += `<i>(نکته: ربات تنها اطلاعات و وضعیت سفارشات و موجودی نهایی را ذخیره می‌کند.)</i>`;
-        
-        await safeSendMessage(chatId, actMsg, getAdminPanelKeyboard());
     }
 
     if (userData.waitingForStarCount && text && text !== 'محاسبه با موجودی من 🔄') {
@@ -1910,9 +1807,6 @@ bot.on('message', async (msg) => {
                 resize_keyboard: true 
             } 
         };
-        if (isAdmin) {
-            supportKeyboard.reply_markup.keyboard.splice(1, 0, [{ text: 'ارسال پیام به کاربر' }]);
-        }
         await safeSendMessage(chatId, `بخش پشتیبانی:`, supportKeyboard);
     }
     else if (text === '👤 پشتیبانی مستقیم') await safeSendMessage(chatId, `ارتباط با ادمین:\n${ADMIN_ID_USERNAME}`, backKeyboard);
