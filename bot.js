@@ -46,7 +46,7 @@ server.listen(PORT, () => {
 // ENTERPRISE CONFIGURATION & CONSTANTS
 // ============================================================================
 
-// ⚠️️ توکن جدید و به‌روز‌شده
+// ⚠️ توکن جدید و به‌روز‌شده
 const TOKEN = (process.env.BOT_TOKEN || process.env.TOKEN || '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54')
     .toString().trim().replace(/^["']|["']$/g, '');
 const TOKEN_LOOKS_VALID = /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(TOKEN);
@@ -2125,7 +2125,7 @@ ${escapeHTML(text)}`;
         const starMsg =
             `💥 وقت درخشیدن با استارز تلگرامه !\n\n` +
             `🎯 کاربردهای استارز :\n` +
-            `✨ فعال‌سازی ری‌‌‌‌اکشن‌ها\n` +
+            `✨ فعال‌سازی ری‌‌اکشن‌ها\n` +
             `🎯 خرید اکانت پرمیوم\n\n` +
             `🪐 لطفاً تعداد استارز مورد نظر خود را ارسال کنید:`;
 
@@ -2219,7 +2219,7 @@ ${escapeHTML(text)}`;
                 resize_keyboard: true
             }
         };
-        await safeSendMessage(chatId, `انتخاب اکانت دریافت‌کننده گیفت`, recipientKeyboard);
+        await safeSendMessage(chatId, `انتخاب اکانت دریافت‌‌کننده گیفت`, recipientKeyboard);
     }
     else if (userData.currentShopState === 'gift_recipient' && text) {
         let usernameInput = text.trim();
@@ -2264,7 +2264,7 @@ ${escapeHTML(text)}`;
             reply_markup: {
                 keyboard: [
                     [{ text: '💳 پرداخت ریالی' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' }]
+                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
                 ],
                 resize_keyboard: true
             }
@@ -2274,7 +2274,7 @@ ${escapeHTML(text)}`;
     else if (text === '💳 پرداخت ریالی') {
         userData.waitingForAmount = true;
         saveDatabase();
-        await safeSendMessage(chatId, `مبلغی که می‌‌خواهید حساب را شارژ کنید وارد نمایید (تومان - فقط عدد):`, backKeyboard);
+        await safeSendMessage(chatId, `مبلغی که می‌‌‌خواهید حساب را شارژ کنید وارد نمایید (تومان - فقط عدد):`, backKeyboard);
     }
     else if (userData.waitingForAmount && text && /^\d+$/.test(text)) {
         const enteredAmount = parseInt(text);
@@ -2311,7 +2311,7 @@ ${escapeHTML(text)}`;
                 keyboard: [
                     [{ text: '👤 پشتیبانی مستقیم' }, { text: '🤖 پشتیبانی هوشمند' }],
                     [{ text: '🎫 ارسال تیکت (غیرمستقیم)' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' }]
+                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
                 ],
                 resize_keyboard: true
             }
@@ -2333,7 +2333,7 @@ ${ADMIN_ID_USERNAME}`, backKeyboard);
     else if (text === '📦 سفارش های اخیر من' || text === 'سفارش های اخیر من 📥') {
         let userOrders = Object.entries(db.orders).filter(([code, order]) => String(order.userId) === String(chatId));
         if (userOrders.length === 0) {
-            await safeSendMessage(chatId, 'شما سفارشی ثبت نکرده‌‌اید.', backKeyboard);
+            await safeSendMessage(chatId, 'شما سفارشی ثبت نکرده‌اید.', backKeyboard);
         } else {
             let msgText = `<b>[ سفارش‌های اخیر شما ]</b>\n\n`;
             userOrders.slice(-5).forEach(([code, order], idx) => {
@@ -2658,19 +2658,40 @@ ${rialVal}`, show_alert: true });
                 targetUser.pendingOrderToAutoPlace = null;
 
                 // ارسال اعلان سفارش جدید به مدیران
-                const adminOrderMsg =
-                    `<b>[ ثبت خودکار سفارش پس از واریز ]</b>\n\n` +
-                    `👤 نام کاربر: ${escapeHTML(targetUser.firstName)}
+                let adminOrderMsg = '';
+                if (pOrder.type === 'gram') {
+                    adminOrderMsg =
+                        `<b>[ ثبت خودکار سفارش پس از واریز ]</b>\n\n` +
+                        `👤 نام کاربر: ${escapeHTML(targetUser.firstName)}
 ` +
-                    `🆔 آیدی عددی: <code>${targetUserId}</code>
+                        `🆔 آیدی عددی: <code>${targetUserId}</code>
 ` +
-                    `🏷️ کد پیگیری: <code>${trackingCode}</code>
+                        `🏷️ کد پیگیری: <code>${trackingCode}</code>
 ` +
-                    `📦 محصول: ${escapeHTML(giftNameStr)}
+                        `💠 مقدار گرام: ${pOrder.gramAmount}
 ` +
-                    `💰 مبلغ کل: ${calculatedCost.toLocaleString()} تومان
+                        `📫 آدرس ولت: <code>${escapeHTML(pOrder.gramWalletAddress)}</code>
 ` +
-                    `⏰ زمان ثبت: ${now}`;
+                        `💬 ممو / کامنت: <code>${escapeHTML(pOrder.gramMemo)}</code>
+` +
+                        `💰 مبلغ کل: ${calculatedCost.toLocaleString()} تومان
+` +
+                        `⏰ زمان ثبت: ${now}`;
+                } else {
+                    adminOrderMsg =
+                        `<b>[ ثبت خودکار سفارش پس از واریز ]</b>\n\n` +
+                        `👤 نام کاربر: ${escapeHTML(targetUser.firstName)}
+` +
+                        `🆔 آیدی عددی: <code>${targetUserId}</code>
+` +
+                        `🏷️ کد پیگیری: <code>${trackingCode}</code>
+` +
+                        `📦 محصول: ${escapeHTML(giftNameStr)}
+` +
+                        `💰 مبلغ کل: ${calculatedCost.toLocaleString()} تومان
+` +
+                        `⏰ زمان ثبت: ${now}`;
+                }
 
                 await notifyAdmins(adminOrderMsg, {
                     reply_markup: {
@@ -2689,7 +2710,7 @@ ${rialVal}`, show_alert: true });
         // پیام تایید رسید و افزایش موجودی برای کاربر همراه با اطلاع‌رسانی ثبت خودکار سفارش
         let userMsgText = 
             `✅ <b>رسید پرداخت شما تایید شد!</b>\n\n` +
-            `🏷️ شماره رسید: <code>${escapeHTML(receiptCode)}</code>\n` +
+            `🏷️️ شماره رسید: <code>${escapeHTML(receiptCode)}</code>\n` +
             `💰 مبلغ واریزشده: ${amount.toLocaleString()} تومان\n` +
             `💳 <b>این مبلغ به حساب کاربری شما اضافه شد.</b>`;
 
