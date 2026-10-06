@@ -46,7 +46,7 @@ server.listen(PORT, () => {
 // ENTERPRISE CONFIGURATION & CONSTANTS
 // ============================================================================
 
-// ⚠️ توکن جدید و به‌روز‌شده
+// ⚠️️ توکن جدید و به‌روز‌شده
 const TOKEN = (process.env.BOT_TOKEN || process.env.TOKEN || '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54')
     .toString().trim().replace(/^["']|["']$/g, '');
 const TOKEN_LOOKS_VALID = /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(TOKEN);
@@ -926,7 +926,7 @@ async function revalidateAppliedDiscount(chatId, userData, showFn) {
     if (r.ok) return true;
     clearDiscount(userData);
     saveDatabase();
-    await safeSendMessage(chatId, `⚠️ ${r.error}\nکد تخفیف از فاکتور حذف شد، لطفاً فاکتور جدید را بررسی کنید.`);
+    await safeSendMessage(chatId, `⚠️️ ${r.error}\nکد تخفیف از فاکتور حذف شد، لطفاً فاکتور جدید را بررسی کنید.`);
     await showFn(chatId, userData, false);
     return false;
 }
@@ -1122,7 +1122,7 @@ async function handleMessage(msg) {
                 reply_markup: {
                     keyboard: [
                         [{ text: 'محاسبه با موجودی من 🔄' }],
-                        [{ text: 'برگشت ↩️️' }]
+                        [{ text: 'برگشت ↩' }]
                     ],
                     resize_keyboard: true
                 }
@@ -1785,7 +1785,7 @@ async function handleMessage(msg) {
 ` +
             `💫 تعداد استارز: ${userData.starCount}
 ` +
-            `📥 دریافت‌کننده: @${escapeHTML(userData.starRecipient)}
+            `📥 دریافت‌کننده: <code>@${escapeHTML(userData.starRecipient)}</code>
 ` +
             `💰 مبلغ کل: ${db.orders[trackingCode].amount.toLocaleString()} تومان
 ` +
@@ -1845,7 +1845,7 @@ async function handleMessage(msg) {
 ` +
             `🎁 نام گیفت: ${escapeHTML(userData.selectedGiftName)} (${userData.selectedGiftStars} استارز)
 ` +
-            `📥 دریافت‌کننده: @${escapeHTML(userData.recipientUsername)}
+            `📥 دریافت‌کننده: <code>@${escapeHTML(userData.recipientUsername)}</code>
 ` +
             `💬 کامنت: ${escapeHTML(userData.commentText)}
 ` +
@@ -1908,7 +1908,7 @@ async function handleMessage(msg) {
 ` +
             `📫 آدرس ولت: <code>${escapeHTML(userData.gramWalletAddress)}</code>
 ` +
-            `💬 ممو / کامنت: ${escapeHTML(userData.gramMemo)}
+            `💬 ممو / کامنت: <code>${escapeHTML(userData.gramMemo)}</code>
 ` +
             `💰 مبلغ کل: ${db.orders[trackingCode].amount.toLocaleString()} تومان
 ` +
@@ -2021,7 +2021,7 @@ ${escapeHTML(text)}`;
 `;
         }
 
-        actMsg += `\n<b>🛍️️ تفکیک فاکتورها و سفارشات:</b>\n`;
+        actMsg += `\n<b>🛍 تفکیک فاکتورها و سفارشات:</b>\n`;
         const ordersList = Object.entries(db.orders);
         if (ordersList.length > 0) {
             ordersList.slice(-10).forEach(([code, ord], idx) => {
@@ -2125,7 +2125,7 @@ ${escapeHTML(text)}`;
         const starMsg =
             `💥 وقت درخشیدن با استارز تلگرامه !\n\n` +
             `🎯 کاربردهای استارز :\n` +
-            `✨ فعال‌سازی ری‌‌اکشن‌ها\n` +
+            `✨ فعال‌سازی ری‌‌‌‌اکشن‌ها\n` +
             `🎯 خرید اکانت پرمیوم\n\n` +
             `🪐 لطفاً تعداد استارز مورد نظر خود را ارسال کنید:`;
 
@@ -2333,7 +2333,7 @@ ${ADMIN_ID_USERNAME}`, backKeyboard);
     else if (text === '📦 سفارش های اخیر من' || text === 'سفارش های اخیر من 📥') {
         let userOrders = Object.entries(db.orders).filter(([code, order]) => String(order.userId) === String(chatId));
         if (userOrders.length === 0) {
-            await safeSendMessage(chatId, 'شما سفارشی ثبت نکرده‌اید.', backKeyboard);
+            await safeSendMessage(chatId, 'شما سفارشی ثبت نکرده‌‌اید.', backKeyboard);
         } else {
             let msgText = `<b>[ سفارش‌های اخیر شما ]</b>\n\n`;
             userOrders.slice(-5).forEach(([code, order], idx) => {
