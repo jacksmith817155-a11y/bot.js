@@ -47,7 +47,7 @@ server.listen(PORT, () => {
 // ============================================================================
 
 // ⚠️ توکن جدید و به‌روز‌شده
-const TOKEN = (process.env.BOT_TOKEN || process.env.TOKEN || '8952100092:AAEfk76ez4jFq6VMPCUSVLPcAeaXBb7AX54')
+const TOKEN = (process.env.BOT_TOKEN || process.env.TOKEN || '8952100092:AAFZTSOnPyLI1VypgZDMoLvYsAi7u5sIbyA')
     .toString().trim().replace(/^["']|["']$/g, '');
 const TOKEN_LOOKS_VALID = /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(TOKEN);
 const ADMIN_ID_USERNAME = '@shantiaNFT';
