@@ -744,27 +744,23 @@ async function getMarketPrices() {
     return priceInFlight;
 }
 
-// قیمت یک تون برای مشتری (تومان) با سود
 async function getTonTomanPrice() {
     if (db.manualTonPrice && db.manualTonPrice > 0) return db.manualTonPrice;
     const m = await getMarketPrices();
     return Math.round(m.tonToman * PRICE_MULTIPLIER);
 }
 
-// قیمت یک استارز برای مشتری (تومان) با سود
 async function fetchStarsPrice() {
     if (db.manualStarPrice && db.manualStarPrice > 0) return db.manualStarPrice;
     const m = await getMarketPrices();
     return Math.round(STAR_USD * m.usdtToman * PRICE_MULTIPLIER);
 }
 
-// قیمت گرام/تون برای فاکتور و موجودی
 async function fetchGramData() {
     const finalPrice = await getTonTomanPrice();
     return { finalPrice };
 }
 
-// قیمت گیفت استارزی: تعداد استارز × قیمت هر استارز
 async function getGiftPriceToman(stars) {
     if (db.manualGiftBasePrice && db.manualGiftBasePrice > 0) {
         return Math.round((db.manualGiftBasePrice / 15) * stars);
@@ -1641,7 +1637,6 @@ async function handleMessage(msg) {
         return;
     }
 
-    // ---------------- Smart Support (AI) Section ----------------
     if (userData.waitingForSmartSupport && text) {
         if (text === '🔙 بازگشت به منوی اصلی' || text === 'برگشت ↩️') {
             userData.waitingForSmartSupport = false;
@@ -1678,7 +1673,6 @@ async function handleMessage(msg) {
         return;
     }
 
-    // ---------------- Discount code input & live invoice edit ----------------
     if (userData.waitingForDiscountInput && text) {
         userData.waitingForDiscountInput = false;
         saveDatabase();
@@ -2463,7 +2457,6 @@ async function handleCallback(callbackQuery) {
 
     const adminData = getUserDataById(fromId);
 
-    // 1. انجام سفارش
     if (action.startsWith('order_done_')) {
         const trackingCode = action.replace('order_done_', '');
         const order = db.orders[trackingCode];
@@ -2479,4 +2472,123 @@ async function handleCallback(callbackQuery) {
 
         order.status = 'completed';
         order.completedAt = getFormattedTime();
-        save
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id, { text: '✅ سفارش تایید و تکمیل شد.' });
+        await editAdminMessage(msg, `<b>[ سفارش تکمیل شد ✅ ]</b>\n\nکد: <code>${escapeHTML(trackingCode)}</code>\nتوسط: ${escapeHTML(callbackQuery.from.first_name)}`);
+        await safeSendMessage(order.userId, `✅ سفارش شما با کد پیگیری <code>${escapeHTML(trackingCode)}</code> انجام شد و به اتمام رسید!`);
+        await sendChannelReport(order);
+        return;
+    }
+
+    if (action.startsWith('order_reject_')) {
+        const trackingCode = action.replace('order_reject_', '');
+        const order = db.orders[trackingCode];
+        if (!order) {
+            await safeAnswer(callbackQuery.id, { text: 'سفارش پیدا نشد.', show_alert: true });
+            return;
+        }
+        if (order.status !== 'pending') {
+            await safeAnswer(callbackQuery.id, { text: 'این سفارش قبلاً بررسی شده است.', show_alert: true });
+            return;
+        }
+
+        adminData.waitingForOrderRejectReason = true;
+        adminData.rejectOrderCode = trackingCode;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id);
+        await safeSendMessage(chatId, `لطفاً دلیل رد سفارش با کد <code>${escapeHTML(trackingCode)}</code> را ارسال کنید:`);
+        return;
+    }
+
+    if (action.startsWith('approve_receipt_')) {
+        const parts = action.replace('approve_receipt_', '').split('_');
+        const targetUserId = parts[0];
+        const amount = parseInt(parts[1]);
+        const receiptCode = parts[2];
+
+        if (db.processedReceipts[receiptCode]) {
+            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً بررسی شده است.', show_alert: true });
+            await editAdminMessage(msg, `<b>[ این رسید قبلاً بررسی شده است ]</b>`);
+            return;
+        }
+
+        db.processedReceipts[receiptCode] = 'approved';
+        if (!db.approvedReceiptsHistory) db.approvedReceiptsHistory = [];
+        db.approvedReceiptsHistory.push({
+            userId: targetUserId,
+            amount: amount,
+            receiptCode: receiptCode,
+            time: getFormattedTime()
+        });
+
+        const targetUser = getUserDataById(targetUserId);
+        targetUser.wallet += amount;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id, { text: '✅ رسید تایید و موجودی شارژ شد.' });
+        await editAdminMessage(msg, `<b>[ رسید تایید شد ✅ ]</b>\n\nمبلغ: ${amount.toLocaleString()} تومان\nبه کاربر: <code>${targetUserId}</code>`);
+        await safeSendMessage(targetUserId, `✅ رسید پرداخت شما تایید شد و مبلغ ${amount.toLocaleString()} تومان به موجودی حساب شما واریز گردید! 🎉`);
+
+        if (targetUser.pendingOrderToAutoPlace) {
+            const po = targetUser.pendingOrderToAutoPlace;
+            targetUser.pendingOrderToAutoPlace = null;
+            saveDatabase();
+
+            if (po.type === 'star') {
+                targetUser.starCount = po.starCount;
+                targetUser.starRecipient = po.starRecipient;
+                targetUser.currentShopState = 'star_invoice';
+                saveDatabase();
+                await showStarInvoice(targetUserId, targetUser);
+            } else if (po.type === 'gift') {
+                targetUser.selectedGiftName = po.selectedGiftName;
+                targetUser.selectedGiftStars = po.selectedGiftStars;
+                targetUser.recipientUsername = po.recipientUsername;
+                targetUser.commentText = po.commentText;
+                targetUser.currentShopState = 'gift_invoice';
+                saveDatabase();
+                await showGiftInvoice(targetUserId, targetUser);
+            } else if (po.type === 'gram') {
+                targetUser.gramAmount = po.gramAmount;
+                targetUser.gramWalletAddress = po.gramWalletAddress;
+                targetUser.gramMemo = po.gramMemo;
+                targetUser.currentShopState = 'gram_invoice';
+                saveDatabase();
+                await showGramInvoice(targetUserId, targetUser);
+            }
+        }
+        return;
+    }
+
+    if (action.startsWith('reject_receipt_')) {
+        const parts = action.replace('reject_receipt_', '').split('_');
+        const targetUserId = parts[0];
+        const receiptCode = parts[1];
+
+        if (db.processedReceipts[receiptCode]) {
+            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً بررسی شده است.', show_alert: true });
+            return;
+        }
+
+        adminData.waitingForReceiptRejectReason = true;
+        adminData.rejectTargetId = targetUserId;
+        adminData.rejectReceiptCode = receiptCode;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id);
+        await safeSendMessage(chatId, `لطفاً دلیل رد رسید <code>${receiptCode}</code> را ارسال کنید:`);
+        return;
+    }
+
+    if (action.startsWith('reply_')) {
+        const targetUserId = action.replace('reply_', '');
+        adminData.adminReplyingTo = targetUserId;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id);
+        await safeSendMessage(chatId, `لطفاً پاسخ خود را برای کاربر <code>${targetUserId}</code> بفرستید:`);
+        return;
+    }
+}
