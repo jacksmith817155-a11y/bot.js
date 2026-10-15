@@ -1,10 +1,17 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V4.6 (Complete, Bug-Free, Auto-Order on Balance Approval)
+ * Stars Plus TELEGRAM BOT - V4.7 (Auto prices from BrsApi, +8% margin, env secrets)
+ *
+ * Required env vars:
+ *   BOT_TOKEN      - توکن ربات
+ *   BRSAPI_KEY     - کلید BrsApi (برای قیمت خودکار تتر و تون)
+ * Optional env vars:
+ *   PROFIT_PERCENT - درصد سود روی قیمت API (پیش‌فرض 8)
+ *   PORT           - پورت وب سرویس (Render خودش تنظیم می‌کند)
  * ============================================================================
  */
 
-// ---- محافظ خطا: قبل از هر چیز ثبت می‌شود تا ربات با یک خطای ناگهانی خاموش نشود ----
+// ---- محافظ خطا ----
 process.on('uncaughtException', (err) => {
     console.error('[FATAL-GUARD] Uncaught Exception:', err && err.stack ? err.stack : err);
 });
@@ -16,8 +23,7 @@ let TelegramModule;
 try {
     TelegramModule = require('node-telegram-bot-api');
 } catch (e) {
-    console.error('[FATAL] پکیج node-telegram-bot-api نصب نیست. در package.json بخش dependencies این پکیج باید باشد (npm install node-telegram-bot-api).');
-    console.error(e && e.message ? e.message : e);
+    console.error('[FATAL] پکیج node-telegram-bot-api نصب نیست (npm install node-telegram-bot-api).');
     process.exit(1);
 }
 const fs = require('fs');
@@ -26,30 +32,42 @@ const http = require('http');
 const path = require('path');
 
 // ============================================================================
+// LOGGER
+// ============================================================================
+class SystemLogger {
+    static info(context, message) {
+        console.log(`[INFO] [${new Date().toISOString()}] [${context}] - ${message}`);
+    }
+    static error(context, message, err = null) {
+        console.error(`[ERROR] [${new Date().toISOString()}] [${context}] - ${message}`);
+        if (err && err.message) console.error(`       Details: ${err.message}`);
+    }
+}
+
+// ============================================================================
 // RENDER WEB SERVICE PORT BINDING SERVER
 // ============================================================================
 const PORT = process.env.PORT || 10000;
 const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Stars Plus Bot Web Service is running successfully!\n');
 });
-
 server.on('error', (err) => {
     console.error(`[Server] HTTP server error (${err && err.code}): ${err && err.message}`);
 });
-
 server.listen(PORT, () => {
     console.log(`[Server] HTTP server is listening on port ${PORT}`);
 });
 
 // ============================================================================
-// ENTERPRISE CONFIGURATION & CONSTANTS
+// ENV CONFIG (no secrets in code)
 // ============================================================================
-
-// ⚠️ توکن جدید و به‌روز‌شده
-const TOKEN = (process.env.BOT_TOKEN || process.env.TOKEN || '8952100092:AAFZTSOnPyLI1VypgZDMoLvYsAi7u5sIbyA')
-    .toString().trim().replace(/^["']|["']$/g, '');
+const TOKEN = (process.env.BOT_TOKEN || '').toString().trim().replace(/^["']|["']$/g, '');
 const TOKEN_LOOKS_VALID = /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(TOKEN);
+const BRSAPI_KEY = (process.env.BRSAPI_KEY || '').toString().trim();
+const PROFIT_PERCENT = Number(process.env.PROFIT_PERCENT || 8);
+const PRICE_MULTIPLIER = 1 + (PROFIT_PERCENT / 100);
+
 const ADMIN_ID_USERNAME = '@shantiaNFT';
 const ADMIN_NUMERIC_ID = 8750484397;
 const EXTRA_ADMIN_ID = '8942987641';
@@ -61,12 +79,12 @@ const REPORT_CHANNEL = '@nova1_shopp';
 const CARD_NUMBER = '6219861452862914';
 const CARD_OWNER = 'شنتیا زاهد پور';
 
+// قیمت هر استارز به دلار (تتر)
 const STAR_USD = 0.015;
 
-const FALLBACK_USDT_TOMAN = 65000;
-const FALLBACK_GRAM_TOMAN = 311591;
-
-// دکمه‌های پنل مدیریت (یک منبع واحد برای کیبورد و تشخیص دکمه)
+// ============================================================================
+// BUTTONS
+// ============================================================================
 const BTN = {
     ADD: '➕ افزایش موجودی کاربر',
     SUB: '➖ کاهش موجودی کاربر',
@@ -82,7 +100,6 @@ const BTN = {
     BACK: '🔙 بازگشت به منوی اصلی'
 };
 
-// حذف کاراکترهای نامرئی برای مقایسه مطمئن دکمه‌ها
 function norm(s) {
     return (s || '').toString().replace(/[\uFE0E\uFE0F\u200B-\u200F\u202A-\u202E]/g, '').replace(/\s+/g, ' ').trim();
 }
@@ -91,28 +108,8 @@ function isBtn(text, label) {
 }
 
 // ============================================================================
-// SYSTEM LOGGING UTILITY
-// ============================================================================
-
-class SystemLogger {
-    static info(context, message) {
-        const timestamp = new Date().toISOString();
-        console.log(`[INFO] [${timestamp}] [${context}] - ${message}`);
-    }
-
-    static error(context, message, err = null) {
-        const timestamp = new Date().toISOString();
-        console.error(`[ERROR] [${timestamp}] [${context}] - ${message}`);
-        if (err && err.message) {
-            console.error(`       Details: ${err.message}`);
-        }
-    }
-}
-
-// ============================================================================
 // BOT INITIALIZATION
 // ============================================================================
-
 const TelegramBot = typeof TelegramModule === 'function'
     ? TelegramModule
     : (
@@ -123,7 +120,10 @@ const TelegramBot = typeof TelegramModule === 'function'
     );
 
 if (!TOKEN_LOOKS_VALID) {
-    SystemLogger.error('Token', '❌ توکن ربات نامعتبر یا تنظیم نشده است!');
+    SystemLogger.error('Token', '❌ BOT_TOKEN در متغیرهای محیطی تنظیم نشده یا نامعتبر است!');
+}
+if (!BRSAPI_KEY) {
+    SystemLogger.error('Config', '⚠️ BRSAPI_KEY تنظیم نشده؛ قیمت خودکار کار نمی‌کند و خرید با قیمت لحظه‌ای انجام نمی‌شود.');
 }
 
 const bot = new TelegramBot(TOKEN, {
@@ -170,10 +170,46 @@ if (TOKEN_LOOKS_VALID) {
     } catch (e) {}
     try {
         Promise.resolve(bot.getMe())
-            .then(me => SystemLogger.info('Token', `✅ توکن معتبر است. ربات: @${me.username}`))
-            .catch(e => {});
+            .then(me => { BOT_USERNAME = me.username; SystemLogger.info('Token', `✅ توکن معتبر است. ربات: @${me.username}`); })
+            .catch(() => {});
     } catch (e) {}
 }
+
+let BOT_USERNAME = '';
+
+function pickButtonStyle(label) {
+    const t = String(label || '');
+    if (/❌|لغو|برگشت|بازگشت/.test(t)) return 'danger';
+    if (/✅|تایید|تأیید|خرید|انجام|عضویت|مشاهده/.test(t)) return 'success';
+    return 'primary';
+}
+
+function styleButtons(markup) {
+    const out = { ...markup };
+    if (Array.isArray(markup.keyboard)) {
+        out.keyboard = markup.keyboard.map(row => row.map(btn => {
+            if (typeof btn !== 'object' || btn.style) return btn;
+            return { ...btn, style: pickButtonStyle(btn.text) };
+        }));
+    }
+    if (Array.isArray(markup.inline_keyboard)) {
+        out.inline_keyboard = markup.inline_keyboard.map(row => row.map(btn => {
+            if (btn.style) return btn;
+            return { ...btn, style: pickButtonStyle(btn.text) };
+        }));
+    }
+    return out;
+}
+
+['sendMessage', 'sendPhoto', 'editMessageText', 'editMessageCaption'].forEach(fn => {
+    const original = bot[fn].bind(bot);
+    bot[fn] = (...args) => {
+        const styled = args.map(a => (a && typeof a === 'object' && a.reply_markup && typeof a.reply_markup === 'object')
+            ? { ...a, reply_markup: styleButtons(a.reply_markup) }
+            : a);
+        return original(...styled);
+    };
+});
 
 process.removeAllListeners('uncaughtException');
 process.removeAllListeners('unhandledRejection');
@@ -187,7 +223,6 @@ process.on('unhandledRejection', (reason, promise) => {
 // ============================================================================
 // DATABASE
 // ============================================================================
-
 let db = {
     users: {},
     orders: {},
@@ -252,7 +287,7 @@ function getUserDataTemplate() {
         lastReceiptCode: null,
         lastReceiptAmount: 0,
         lastReceiptTime: '',
-        pendingOrderToAutoPlace: null, // نگهداری سفارش معلق برای ثبت خودکار پس از تایید واریز
+        pendingOrderToAutoPlace: null,
 
         waitingForAdminUserSearch: false,
         waitingForAdminAmount: false,
@@ -280,8 +315,7 @@ function getUserDataTemplate() {
 function loadDatabase() {
     try {
         if (fs.existsSync(DB_FILE)) {
-            const data = fs.readFileSync(DB_FILE, 'utf8');
-            const loadedDb = JSON.parse(data);
+            const loadedDb = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 
             if (loadedDb.users) {
                 for (const [userId, userData] of Object.entries(loadedDb.users)) {
@@ -320,12 +354,11 @@ function saveDatabase() {
 }
 
 loadDatabase();
-SystemLogger.info('System', 'Nova Shop Bot is running with all updates!');
+SystemLogger.info('System', 'Stars Plus Bot is running.');
 
 // ============================================================================
 // USER STATE
 // ============================================================================
-
 function getUserDataById(userId) {
     if (!db.users[userId]) {
         db.users[userId] = getUserDataTemplate();
@@ -338,7 +371,6 @@ function getUserData(msg) {
     if (!msg.from) return getUserDataById(msg.chat.id);
     const user = msg.from;
     const userData = getUserDataById(user.id);
-
     if (user.first_name && userData.firstName === 'کاربر') {
         userData.firstName = user.first_name;
         saveDatabase();
@@ -387,29 +419,25 @@ function resetAdminFlags(adminData) {
 // ============================================================================
 // MESSAGING & UI UTILITIES
 // ============================================================================
-
 function escapeHTML(text) {
-    if (!text) return '';
+    if (text === undefined || text === null) return '';
     return text.toString()
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 async function safeDeleteMessage(chatId, messageId) {
     try {
-        if (messageId) {
-            await bot.deleteMessage(chatId, messageId);
-        }
+        if (messageId) await bot.deleteMessage(chatId, messageId);
     } catch (err) {}
 }
 
 async function safeSendMessage(chatId, text, options = {}) {
     try {
-        const finalOptions = { parse_mode: 'HTML', ...options };
-        return await bot.sendMessage(chatId, text, finalOptions);
+        return await bot.sendMessage(chatId, text, { parse_mode: 'HTML', ...options });
     } catch (err) {
         SystemLogger.error('TelegramAPI', `Failed to send message to ${chatId}`, err);
     }
@@ -502,18 +530,13 @@ async function setReaction(chatId, messageId) {
 }
 
 function getTehranDate() {
-    return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tehran" }));
+    return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tehran' }));
 }
 
 function getFormattedTime() {
-    const tehranTime = getTehranDate();
-    const y = tehranTime.getFullYear();
-    const m = String(tehranTime.getMonth() + 1).padStart(2, '0');
-    const d = String(tehranTime.getDate()).padStart(2, '0');
-    const hh = String(tehranTime.getHours()).padStart(2, '0');
-    const mm = String(tehranTime.getMinutes()).padStart(2, '0');
-    const ss = String(tehranTime.getSeconds()).padStart(2, '0');
-    return `${y}/${m}/${d} ${hh}:${mm}:${ss}`;
+    const t = getTehranDate();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${t.getFullYear()}/${p(t.getMonth() + 1)}/${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`;
 }
 
 async function sendChannelReport(order) {
@@ -521,14 +544,10 @@ async function sendChannelReport(order) {
         const userIdStr = order.userId.toString();
         let maskedUserId = userIdStr;
         if (userIdStr.length >= 6) {
-            const start = userIdStr.substring(0, 2);
-            const end = userIdStr.slice(-2);
-            maskedUserId = start + '....' + end;
+            maskedUserId = userIdStr.substring(0, 2) + '....' + userIdStr.slice(-2);
         } else if (userIdStr.length > 2) {
             maskedUserId = userIdStr[0] + '..' + userIdStr.slice(-1);
         }
-
-        const formattedTime = getFormattedTime();
 
         const reportMsg =
             `گزارشات | نوا شاپ\n` +
@@ -536,14 +555,14 @@ async function sendChannelReport(order) {
             `👤 خریدار: <code>${maskedUserId}</code>\n` +
             `🛒 سفارش: ${escapeHTML(order.giftName)}\n` +
             `💳 مبلغ پرداخت شده: ${order.amount.toLocaleString()} تومان\n\n` +
-            `🕰 ${formattedTime}\n` +
+            `🕰 ${getFormattedTime()}\n` +
             `🐺 @nova1_shopp`;
 
         await bot.sendMessage(REPORT_CHANNEL, reportMsg, {
             parse_mode: 'HTML',
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: '🤖 | برای خرید اقدام کن!', url: 'https://t.me/nova1_shopp' }]
+                    [{ text: '🤖 | برای خرید اقدام کن!', url: BOT_USERNAME ? `https://t.me/${BOT_USERNAME}` : 'https://t.me/nova1_shopp' }]
                 ]
             }
         });
@@ -561,8 +580,7 @@ async function checkMembership(userId) {
     try {
         for (const channel of FORCE_JOIN_CHANNELS) {
             const chatMember = await bot.getChatMember(channel, userId);
-            const isJoined = ['creator', 'administrator', 'member', 'restricted'].includes(chatMember.status);
-            if (!isJoined) {
+            if (!['creator', 'administrator', 'member', 'restricted'].includes(chatMember.status)) {
                 return false;
             }
         }
@@ -575,7 +593,6 @@ async function checkMembership(userId) {
 // ============================================================================
 // DISCOUNT HELPERS
 // ============================================================================
-
 function discountTypeForState(state) {
     if (state === 'star_invoice') return 'stars';
     if (state === 'gift_invoice') return 'gift_stars';
@@ -613,122 +630,160 @@ function consumeDiscount(userData) {
 }
 
 // ============================================================================
-// FINANCIAL API INTEGRATIONS
+// AUTOMATIC PRICES (BrsApi)
+// ----------------------------------------------------------------------------
+// تتر و تون از API گرفته می‌شوند. روی آن‌ها PROFIT_PERCENT (پیش‌فرض ۸٪) سود
+// اضافه می‌شود. قیمت استارز = 0.015 تتر × قیمت تتر (تومان) × (۱ + سود).
+// اگر API در دسترس نباشد، آخرین قیمت معتبر تا ۱۰ دقیقه استفاده می‌شود و بعد
+// از آن خرید متوقف می‌شود تا با قیمت قدیمی فروش انجام نشود.
 // ============================================================================
+const PRICE_CACHE_TTL_MS = 30 * 1000;
+const PRICE_MAX_STALE_MS = 10 * 60 * 1000;
+const BRSAPI_TIMEOUT_MS = 6000;
 
-async function getWallexUsdtPriceInToman() {
-    return new Promise((resolve) => {
-        const url = `https://api.wallex.ir/v1/markets`;
-        https.get(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 StarsPlusBot',
-                'Cache-Control': 'no-cache'
-            }
-        }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed && parsed.result && parsed.result.symbols && parsed.result.symbols.USDTTMN) {
-                        const stats = parsed.result.symbols.USDTTMN.stats;
-                        const usdtPrice = parseFloat(stats.lastPrice || stats.bidPrice);
-                        if (!isNaN(usdtPrice) && usdtPrice > 0) {
-                            resolve(Math.round(usdtPrice));
-                            return;
-                        }
-                    }
-                    resolve(FALLBACK_USDT_TOMAN);
-                } catch (e) {
-                    resolve(FALLBACK_USDT_TOMAN);
-                }
-            });
-        }).on('error', () => {
-            resolve(FALLBACK_USDT_TOMAN);
-        });
-    });
-}
+const MARKET_MATCH = {
+    tether: { en: ['tether'], fa: ['تتر'] },
+    ton: { en: ['toncoin'], fa: ['تونکوین', 'تون'] },
+    usdc: { en: ['usd coin'], fa: ['یواسدیکوین'] }
+};
 
-async function getBinanceTONPriceInToman() {
-    if (db.manualTonPrice && db.manualTonPrice > 0) {
-        return db.manualTonPrice;
+class PriceUnavailableError extends Error {
+    constructor() {
+        super('PRICE_UNAVAILABLE');
+        this.code = 'PRICE_UNAVAILABLE';
     }
+}
 
-    const usdtToman = await getWallexUsdtPriceInToman();
+let priceCache = { data: null, time: 0 };
+let priceInFlight = null;
 
-    return new Promise((resolve) => {
-        const url = `https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT`;
-        https.get(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 StarsPlusBot',
-                'Cache-Control': 'no-cache'
-            }
+function fetchJson(url) {
+    return new Promise((resolve, reject) => {
+        const req = https.get(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot', 'Cache-Control': 'no-cache' }
         }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed && parsed.price) {
-                        const tonUsdt = parseFloat(parsed.price);
-                        if (!isNaN(tonUsdt) && tonUsdt > 0) {
-                            const calculatedToman = Math.round(tonUsdt * usdtToman);
-                            resolve(calculatedToman > 0 ? calculatedToman : FALLBACK_GRAM_TOMAN);
-                            return;
-                        }
-                    }
-                    resolve(FALLBACK_GRAM_TOMAN);
-                } catch (e) {
-                    resolve(FALLBACK_GRAM_TOMAN);
-                }
+                try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
             });
-        }).on('error', () => {
-            resolve(FALLBACK_GRAM_TOMAN);
         });
+        req.on('error', reject);
+        req.setTimeout(BRSAPI_TIMEOUT_MS, () => req.destroy(new Error('BrsApi timeout')));
     });
 }
 
+function toNumber(v) {
+    const n = parseFloat(String(v ?? '').replace(/[,\s]/g, ''));
+    return isNaN(n) ? 0 : n;
+}
+
+function normalizeFa(s) {
+    return String(s || '').replace(/[\u200c\s]/g, '').trim();
+}
+
+function findMarketItem(list, matcher) {
+    return list.find(item => {
+        const en = String(item.name_en || '').trim().toLowerCase();
+        const fa = normalizeFa(item.name);
+        return matcher.en.includes(en) || matcher.fa.includes(fa);
+    }) || null;
+}
+
+function parseMarket(payload) {
+    const list = Array.isArray(payload)
+        ? payload
+        : ((payload && (payload.data || payload.result || payload.items)) || []);
+    if (!Array.isArray(list) || list.length === 0) throw new Error('BrsApi response is empty');
+
+    const tether = findMarketItem(list, MARKET_MATCH.tether);
+    const ton = findMarketItem(list, MARKET_MATCH.ton);
+    const usdc = findMarketItem(list, MARKET_MATCH.usdc);
+
+    let usdtToman = tether ? toNumber(tether.price_toman) : 0;
+    if (usdtToman <= 0 && tether && usdc && toNumber(usdc.price) > 0 && toNumber(usdc.price_toman) > 0) {
+        usdtToman = toNumber(tether.price) * (toNumber(usdc.price_toman) / toNumber(usdc.price));
+    }
+    usdtToman = Math.round(usdtToman);
+    if (usdtToman <= 0) throw new Error('Tether toman price not available');
+
+    const tonUsd = ton ? toNumber(ton.price) : 0;
+    let tonToman = ton ? toNumber(ton.price_toman) : 0;
+    if (tonToman <= 0 && tonUsd > 0) tonToman = tonUsd * usdtToman;
+    tonToman = Math.round(tonToman);
+    if (tonToman <= 0) throw new Error('TON price not available');
+
+    return { usdtToman, tonToman, tonUsd, time: Date.now() };
+}
+
+async function getMarketPrices() {
+    if (priceCache.data && Date.now() - priceCache.time < PRICE_CACHE_TTL_MS) {
+        return priceCache.data;
+    }
+    if (priceInFlight) return priceInFlight;
+
+    priceInFlight = (async () => {
+        try {
+            if (!BRSAPI_KEY) throw new Error('BRSAPI_KEY تنظیم نشده است');
+            const fresh = parseMarket(await fetchJson(
+                `https://Api.BrsApi.ir/Market/Cryptocurrency.php?key=${encodeURIComponent(BRSAPI_KEY)}`
+            ));
+            priceCache = { data: fresh, time: Date.now() };
+            return fresh;
+        } catch (e) {
+            SystemLogger.error('Price', 'BrsApi fetch failed', e);
+            if (priceCache.data && Date.now() - priceCache.time < PRICE_MAX_STALE_MS) {
+                return priceCache.data;
+            }
+            throw new PriceUnavailableError();
+        } finally {
+            priceInFlight = null;
+        }
+    })();
+
+    return priceInFlight;
+}
+
+// قیمت یک تون برای مشتری (تومان) با سود
+async function getTonTomanPrice() {
+    if (db.manualTonPrice && db.manualTonPrice > 0) return db.manualTonPrice;
+    const m = await getMarketPrices();
+    return Math.round(m.tonToman * PRICE_MULTIPLIER);
+}
+
+// قیمت یک استارز برای مشتری (تومان) با سود
 async function fetchStarsPrice() {
-    if (db.manualStarPrice && db.manualStarPrice > 0) {
-        return db.manualStarPrice;
-    }
-
-    const tonToman = await getBinanceTONPriceInToman();
-    const starUnitBase = (STAR_USD / 5.5) * tonToman;
-
-    if (db.manualTonPrice && db.manualTonPrice > 0) {
-        return Math.round(starUnitBase);
-    }
-
-    return Math.round(starUnitBase * 1.10);
+    if (db.manualStarPrice && db.manualStarPrice > 0) return db.manualStarPrice;
+    const m = await getMarketPrices();
+    return Math.round(STAR_USD * m.usdtToman * PRICE_MULTIPLIER);
 }
 
+// قیمت گرام/تون برای فاکتور و موجودی
 async function fetchGramData() {
-    const rawBinanceBase = await getBinanceTONPriceInToman();
+    const finalPrice = await getTonTomanPrice();
+    return { finalPrice };
+}
 
-    let finalPrice = Math.round(rawBinanceBase * 1.10);
-    if (db.manualTonPrice && db.manualTonPrice > 0) {
-        finalPrice = rawBinanceBase;
+// قیمت گیفت استارزی: تعداد استارز × قیمت هر استارز
+async function getGiftPriceToman(stars) {
+    if (db.manualGiftBasePrice && db.manualGiftBasePrice > 0) {
+        return Math.round((db.manualGiftBasePrice / 15) * stars);
     }
-
-    const usdtToman = await getWallexUsdtPriceInToman();
-    return { gramUsd: (rawBinanceBase / usdtToman).toFixed(2), finalPrice, usdtToman: rawBinanceBase };
+    const unit = await fetchStarsPrice();
+    return Math.round(unit * stars);
 }
 
 // ============================================================================
 // KEYBOARDS
 // ============================================================================
-
 function getMainKeyboard(isAdmin) {
-    let rows = [
+    const rows = [
         [{ text: '🛒 خرید محصول' }],
         [{ text: '➕ افزایش موجودی' }, { text: '💳 حساب کاربری' }],
         [{ text: '📞 پشتیبانی' }, { text: '📦 پیگیری سفارش' }],
         [{ text: '❤️ چطوری میتوانم به شما اعتماد کنم' }]
     ];
-    if (isAdmin) {
-        rows.push([{ text: '🔧 پنل مدیریت' }]);
-    }
+    if (isAdmin) rows.push([{ text: '🔧 پنل مدیریت' }]);
     return { reply_markup: { keyboard: rows, resize_keyboard: true, is_persistent: true } };
 }
 
@@ -748,12 +803,7 @@ function getShopKeyboard() {
 }
 
 function getBackKeyboard() {
-    return {
-        reply_markup: {
-            keyboard: [[{ text: 'برگشت ↩️' }]],
-            resize_keyboard: true
-        }
-    };
+    return { reply_markup: { keyboard: [[{ text: 'برگشت ↩️' }]], resize_keyboard: true } };
 }
 
 function getAccountKeyboard() {
@@ -788,7 +838,6 @@ function getAdminPanelKeyboard() {
 // ============================================================================
 // INVOICES & DISCOUNT PRICING
 // ============================================================================
-
 function clearDiscount(userData) {
     userData.appliedDiscountCode = null;
     userData.appliedDiscountPercent = 0;
@@ -808,27 +857,13 @@ function buildTotals(total, percent) {
 }
 
 async function calcStar(userData) {
-    const unitPrice = userData.starPricePerUnit || await fetchStarsPrice();
+    const unitPrice = await fetchStarsPrice();
     const total = Math.round(unitPrice * userData.starCount);
     return buildTotals(total, getActiveDiscountPercent(userData, 'stars'));
 }
 
 async function calcGift(userData) {
-    let starziTomanPerUnit;
-    if (db.manualGiftBasePrice && db.manualGiftBasePrice > 0) {
-        const base15Price = db.manualGiftBasePrice;
-        starziTomanPerUnit = Math.round((base15Price / 15) * userData.selectedGiftStars);
-    } else {
-        const tonToman = await getBinanceTONPriceInToman();
-        const starziUsdPrice = userData.selectedGiftStars * STAR_USD;
-        const baseGiftToman = (starziUsdPrice / 5.5) * tonToman;
-
-        starziTomanPerUnit = Math.round(baseGiftToman * 1.10);
-        if (db.manualTonPrice && db.manualTonPrice > 0) {
-            starziTomanPerUnit = Math.round(baseGiftToman);
-        }
-    }
-    const total = Math.round(starziTomanPerUnit);
+    const total = await getGiftPriceToman(userData.selectedGiftStars);
     return buildTotals(total, getActiveDiscountPercent(userData, 'gift_stars'));
 }
 
@@ -1006,11 +1041,14 @@ async function showGramInvoice(chatId, userData, edit = false) {
 // ============================================================================
 // MESSAGE HANDLER
 // ============================================================================
-
 bot.on('message', async (msg) => {
     try {
         await handleMessage(msg);
     } catch (err) {
+        if (err && err.code === 'PRICE_UNAVAILABLE') {
+            await safeSendMessage(msg.chat.id, '⚠️ قیمت لحظه‌ای در دسترس نیست. لطفاً چند دقیقه دیگر دوباره تلاش کنید.');
+            return;
+        }
         SystemLogger.error('MessageHandler', 'Error while handling message', err);
     }
 });
@@ -1097,8 +1135,7 @@ async function handleMessage(msg) {
             userData.currentShopState = 'star_menu';
             userData.waitingForStarCount = true;
             saveDatabase();
-            const starPrice = await fetchStarsPrice();
-            userData.starPricePerUnit = starPrice;
+            userData.starPricePerUnit = await fetchStarsPrice();
             saveDatabase();
 
             const starMsg =
@@ -1109,16 +1146,10 @@ async function handleMessage(msg) {
                 `💸 پرداخت هزینه تبلیغات تلگرام\n\n` +
                 `🪐 لطفاً تعداد استارز مورد نظر خود را ارسال کنید:`;
 
-            const starMenuKeyboard = {
-                reply_markup: {
-                    keyboard: [
-                        [{ text: 'محاسبه با موجودی من 🔄' }],
-                        [{ text: 'برگشت ↩' }]
-                    ],
-                    resize_keyboard: true
-                }
-            };
-            await safeSendPhoto(chatId, '1000002624.jpg', { caption: starMsg, reply_markup: starMenuKeyboard.reply_markup });
+            await safeSendPhoto(chatId, '1000002624.jpg', {
+                caption: starMsg,
+                reply_markup: { keyboard: [[{ text: 'محاسبه با موجودی من 🔄' }], [{ text: 'برگشت ↩' }]], resize_keyboard: true }
+            });
             return;
         } else {
             userData.currentShopState = 'main_shop';
@@ -1143,23 +1174,41 @@ async function handleMessage(msg) {
     }
 
     if (isAdmin && text === '/diag') {
+        let webhookInfo;
         try {
-            const info = await bot.getWebHookInfo();
-            await safeSendMessage(chatId,
-                `<b>🔎 تشخیص ربات</b>\n\n` +
-                `Webhook: <code>${escapeHTML(info.url || 'ندارد')}</code>\n` +
-                `پیام‌های در انتظار: ${info.pending_update_count}\n` +
-                `آخرین خطا: ${escapeHTML(info.last_error_message || 'ندارد')}`,
-                adminPanelMarkup);
+            webhookInfo = await bot.getWebHookInfo();
         } catch (e) {
             await safeSendMessage(chatId, `❌ خطا در تشخیص: ${escapeHTML(e.message)}`, adminPanelMarkup);
+            return;
         }
+
+        let priceText;
+        try {
+            const m = await getMarketPrices();
+            const ton = await getTonTomanPrice();
+            const star = await fetchStarsPrice();
+            priceText =
+                `تتر (API): ${m.usdtToman.toLocaleString()} تومان\n` +
+                `تون (API): ${m.tonToman.toLocaleString()} تومان\n` +
+                `قیمت فروش تون: ${ton.toLocaleString()} تومان\n` +
+                `قیمت فروش هر استارز: ${star.toLocaleString()} تومان\n` +
+                `سود: ${PROFIT_PERCENT}%`;
+        } catch (e) {
+            priceText = `⚠️ قیمت در دسترس نیست: ${escapeHTML(e.message)}`;
+        }
+
+        await safeSendMessage(chatId,
+            `<b>🔎 تشخیص ربات</b>\n\n` +
+            `Webhook: <code>${escapeHTML(webhookInfo.url || 'ندارد')}</code>\n` +
+            `پیام‌های در انتظار: ${webhookInfo.pending_update_count}\n` +
+            `آخرین خطا: ${escapeHTML(webhookInfo.last_error_message || 'ندارد')}\n\n` +
+            `<b>💱 قیمت‌ها</b>\n${priceText}`,
+            adminPanelMarkup);
         return;
     }
 
     if (isAdmin && adminData.waitingForManualPrice && text) {
-        const cleanText = text.replace(/,/g, '').trim();
-        const newPrice = parseInt(cleanText);
+        const newPrice = parseInt(text.replace(/,/g, '').trim());
         if (isNaN(newPrice) || newPrice < 0) {
             await safeSendMessage(chatId, '❌ لطفاً یک عدد معتبر به تومان وارد کنید:');
             return;
@@ -1168,15 +1217,14 @@ async function handleMessage(msg) {
         adminData.waitingForManualPrice = false;
         saveDatabase();
         const statusMsg = newPrice === 0
-            ? '✅ قیمت دستی غیرفعال شد.'
+            ? '✅ قیمت دستی غیرفعال شد و قیمت خودکار فعال است.'
             : `✅ قیمت دستی به مبلغ <b>${newPrice.toLocaleString()} تومان</b> ذخیره شد.`;
         await safeSendMessage(chatId, `<b>[ بروزرسانی قیمت ]</b>\n\n${statusMsg}`, adminPanelMarkup);
         return;
     }
 
     if (isAdmin && adminData.waitingForManualStarPrice && text) {
-        const cleanText = text.replace(/,/g, '').trim();
-        const newPrice = parseInt(cleanText);
+        const newPrice = parseInt(text.replace(/,/g, '').trim());
         if (isNaN(newPrice) || newPrice < 0) {
             await safeSendMessage(chatId, '❌ لطفاً یک عدد معتبر وارد کنید:');
             return;
@@ -1185,15 +1233,14 @@ async function handleMessage(msg) {
         adminData.waitingForManualStarPrice = false;
         saveDatabase();
         const statusMsg = newPrice === 0
-            ? '✅ قیمت دستی استارز غیرفعال شد.'
+            ? '✅ قیمت دستی استارز غیرفعال شد و قیمت خودکار فعال است.'
             : `✅ قیمت دستی هر واحد استارز به مبلغ <b>${newPrice.toLocaleString()} تومان</b> ذخیره شد.`;
         await safeSendMessage(chatId, `<b>[ بروزرسانی قیمت استارز ]</b>\n\n${statusMsg}`, adminPanelMarkup);
         return;
     }
 
     if (isAdmin && adminData.waitingForManualGiftBasePrice && text) {
-        const cleanText = text.replace(/,/g, '').trim();
-        const newPrice = parseInt(cleanText);
+        const newPrice = parseInt(text.replace(/,/g, '').trim());
         if (isNaN(newPrice) || newPrice < 0) {
             await safeSendMessage(chatId, '❌ لطفاً یک مبلغ معتبر وارد کنید:');
             return;
@@ -1202,7 +1249,7 @@ async function handleMessage(msg) {
         adminData.waitingForManualGiftBasePrice = false;
         saveDatabase();
         const statusMsg = newPrice === 0
-            ? '✅ قیمت دستی گیفت غیرفعال شد.'
+            ? '✅ قیمت دستی گیفت غیرفعال شد و قیمت خودکار فعال است.'
             : `✅ قیمت دستی گیفت ۱۵ استارزی به مبلغ <b>${newPrice.toLocaleString()} تومان</b> تنظیم شد.`;
         await safeSendMessage(chatId, `<b>[ تنظیم قیمت گیفت‌های استارزی ]</b>\n\n${statusMsg}`, adminPanelMarkup);
         return;
@@ -1246,8 +1293,7 @@ async function handleMessage(msg) {
             return;
         }
         if (receiptCode) db.processedReceipts[receiptCode] = 'rejected';
-        
-        // پاکسازی سفارش معتبری که برای این افزایش موجودی منتظر بود
+
         const targetUserObj = getUserDataById(targetUserId);
         targetUserObj.pendingOrderToAutoPlace = null;
         saveDatabase();
@@ -1479,10 +1525,8 @@ async function handleMessage(msg) {
         let usernameInput = text.trim();
         if (usernameInput.includes('برای خودم')) {
             usernameInput = msg.from.username || msg.from.id.toString();
-        } else {
-            if (usernameInput.startsWith('@')) {
-                usernameInput = usernameInput.substring(1);
-            }
+        } else if (usernameInput.startsWith('@')) {
+            usernameInput = usernameInput.substring(1);
         }
 
         userData.starRecipient = usernameInput;
@@ -1660,7 +1704,6 @@ async function handleMessage(msg) {
         userData.appliedDiscountPercent = result.obj.percent;
         saveDatabase();
 
-        // ویرایش زنده فاکتور و اعمال قیمت جدید با خط زدن قیمت قبلی
         await showFn(chatId, userData, true);
         await safeSendMessage(chatId, `✅ کد تخفیف ${result.obj.percent}% با موفقیت روی فاکتور شما اعمال شد.`, invoiceKb);
         return;
@@ -1691,8 +1734,7 @@ async function handleMessage(msg) {
 
     const shortageReply = async (orderType, orderDetails) => {
         const shortage = userData.lastAmount - userData.wallet;
-        
-        // ذخیره اطلاعات سفارش در صف انتظار کاربر تا پس از تأیید واریز به صورت خودکار ثبت شود
+
         userData.pendingOrderToAutoPlace = {
             type: orderType,
             ...orderDetails
@@ -1997,8 +2039,8 @@ async function handleMessage(msg) {
         saveDatabase();
         const currentPriceText = db.manualTonPrice > 0
             ? `<b>${db.manualTonPrice.toLocaleString()} تومان (دستی)</b>`
-            : `<b>خودکار</b>`;
-        await safeSendMessage(chatId, `<b>[ تنظیم قیمت دستی تون ]</b>\n\nوضعیت فعلی: ${currentPriceText}\n\nلطفاً قیمت پایه جدید را به تومان وارد کنید (0 برای حالت آنلاین):`, backKeyboard);
+            : `<b>خودکار (API + ${PROFIT_PERCENT}%)</b>`;
+        await safeSendMessage(chatId, `<b>[ تنظیم قیمت دستی تون ]</b>\n\nوضعیت فعلی: ${currentPriceText}\n\nلطفاً قیمت یک تون را به تومان وارد کنید (0 برای حالت خودکار):`, backKeyboard);
         return;
     }
 
@@ -2007,7 +2049,7 @@ async function handleMessage(msg) {
         saveDatabase();
         const currentPriceText = db.manualStarPrice > 0
             ? `<b>${db.manualStarPrice.toLocaleString()} تومان (دستی)</b>`
-            : `<b>خودکار</b>`;
+            : `<b>خودکار (API + ${PROFIT_PERCENT}%)</b>`;
         await safeSendMessage(chatId, `<b>[ تنظیم قیمت دستی استارز ]</b>\n\nوضعیت فعلی: ${currentPriceText}\n\nلطفاً قیمت هر واحد استارز را وارد کنید (0 برای حالت خودکار):`, backKeyboard);
         return;
     }
@@ -2017,7 +2059,7 @@ async function handleMessage(msg) {
         saveDatabase();
         const currentBasePriceText = db.manualGiftBasePrice > 0
             ? `<b>${db.manualGiftBasePrice.toLocaleString()} تومان (15 استارز)</b>`
-            : `<b>محاسبه خودکار</b>`;
+            : `<b>خودکار</b>`;
         await safeSendMessage(chatId, `<b>[ تنظیم قیمت دستی گیفت‌های استارزی ]</b>\n\nوضعیت فعلی: ${currentBasePriceText}\n\nقیمت گیفت 15 استارزی را وارد کنید (0 برای حالت خودکار):`, backKeyboard);
         return;
     }
@@ -2054,8 +2096,7 @@ async function handleMessage(msg) {
         clearDiscount(userData);
         userData.currentShopState = 'star_menu';
         userData.waitingForStarCount = true;
-        const starsPrice = await fetchStarsPrice();
-        userData.starPricePerUnit = starsPrice;
+        userData.starPricePerUnit = await fetchStarsPrice();
         saveDatabase();
 
         const starMsg =
@@ -2065,16 +2106,10 @@ async function handleMessage(msg) {
             `🎯 خرید اکانت پرمیوم\n\n` +
             `🪐 لطفاً تعداد استارز مورد نظر خود را ارسال کنید:`;
 
-        const starMenuKeyboard = {
-            reply_markup: {
-                keyboard: [
-                    [{ text: 'محاسبه با موجودی من 🔄' }],
-                    [{ text: 'برگشت ↩️' }]
-                ],
-                resize_keyboard: true
-            }
-        };
-        await safeSendPhoto(chatId, '1000002624.jpg', { caption: starMsg, reply_markup: starMenuKeyboard.reply_markup });
+        await safeSendPhoto(chatId, '1000002624.jpg', {
+            caption: starMsg,
+            reply_markup: { keyboard: [[{ text: 'محاسبه با موجودی من 🔄' }], [{ text: 'برگشت ↩️' }]], resize_keyboard: true }
+        });
     }
     else if (text === '💠 خرید ارز گرام ( GRAM )') {
         clearDiscount(userData);
@@ -2161,10 +2196,8 @@ async function handleMessage(msg) {
         let usernameInput = text.trim();
         if (usernameInput.includes('برای خودم')) {
             usernameInput = msg.from.username || msg.from.id.toString();
-        } else {
-            if (usernameInput.startsWith('@')) {
-                usernameInput = usernameInput.substring(1);
-            }
+        } else if (usernameInput.startsWith('@')) {
+            usernameInput = usernameInput.substring(1);
         }
         userData.recipientUsername = usernameInput;
         userData.currentShopState = 'gift_invoice';
@@ -2190,7 +2223,7 @@ async function handleMessage(msg) {
         await safeSendMessage(chatId, `کد پیگیری سفارش خود را ارسال کنید:`, backKeyboard);
     }
     else if (text === '💳 حساب کاربری') {
-        const userInfo = `<b>حساب کاربری شما</b>\n\nنام: ${escapeHTML(userData.firstName)}\nآیدی: <code>${chatId}</code>\موجودی اصلی: ${userData.wallet.toLocaleString()} تومان`;
+        const userInfo = `<b>حساب کاربری شما</b>\n\nنام: ${escapeHTML(userData.firstName)}\nآیدی: <code>${chatId}</code>\nموجودی اصلی: ${userData.wallet.toLocaleString()} تومان`;
         await safeSendMessage(chatId, userInfo, accountKeyboard);
     }
     else if (text === '➕ افزایش موجودی') {
@@ -2287,13 +2320,16 @@ async function handleMessage(msg) {
 }
 
 // ============================================================================
-// INLINE CALLBACK QUERY HANDLER (100% FIXED & ROBUST)
+// INLINE CALLBACK QUERY HANDLER
 // ============================================================================
-
 bot.on('callback_query', async (callbackQuery) => {
     try {
         await handleCallback(callbackQuery);
     } catch (err) {
+        if (err && err.code === 'PRICE_UNAVAILABLE') {
+            await safeAnswer(callbackQuery.id, { text: '⚠️ قیمت لحظه‌ای در دسترس نیست. دوباره تلاش کنید.', show_alert: true });
+            return;
+        }
         SystemLogger.error('CallbackHandler', `Error while handling callback "${callbackQuery && callbackQuery.data}"`, err);
         await safeAnswer(callbackQuery.id, { text: '⚠️ خطایی رخ داد، دوباره تلاش کنید.', show_alert: true });
     }
@@ -2419,7 +2455,6 @@ async function handleCallback(callbackQuery) {
         return;
     }
 
-    // بررسی دسترسی ادمین برای دکمه‌های مدیریتی
     const adminActions = ['order_done_', 'order_reject_', 'approve_receipt_', 'reject_receipt_', 'reply_'];
     if (adminActions.some(p => action.startsWith(p)) && !isAdmin) {
         await safeAnswer(callbackQuery.id, { text: '⛔ شما دسترسی ندارید.', show_alert: true });
@@ -2428,7 +2463,7 @@ async function handleCallback(callbackQuery) {
 
     const adminData = getUserDataById(fromId);
 
-    // 1. انجام سفارش (تایید سفارش)
+    // 1. انجام سفارش
     if (action.startsWith('order_done_')) {
         const trackingCode = action.replace('order_done_', '');
         const order = db.orders[trackingCode];
@@ -2444,206 +2479,4 @@ async function handleCallback(callbackQuery) {
 
         order.status = 'completed';
         order.completedAt = getFormattedTime();
-        saveDatabase();
-        await safeAnswer(callbackQuery.id, { text: '✅ سفارش انجام شد؛ فاکتور برای کاربر و گزارش برای کانال ارسال شد.' });
-
-        // ارسال فاکتور تایید شده برای کاربر
-        const completedInvoiceText =
-            `<b>✅ سفارش شما انجام شد</b>\n` +
-            `🏷️ کد پیگیری: <code>${escapeHTML(trackingCode)}</code>\n\n` +
-            `📦 محصول: ${escapeHTML(order.giftName)}\n` +
-            `💰 مبلغ پرداختی: ${order.amount.toLocaleString()} تومان\n` +
-            `📅 تاریخ ثبت: ${order.time}\n` +
-            `✅ تاریخ انجام: ${order.completedAt}\n\n` +
-            `✨ با تشکر از خرید شما از نوا شاپ!`;
-
-        await safeSendMessage(order.userId, completedInvoiceText);
-
-        // ارسال گزارش خرید به کانال گزارشات
-        await sendChannelReport(order);
-
-        await editAdminMessage(msg, `<b>[ سفارش انجام شد ✓ ]</b>\n\nکد پیگیری: <code>${escapeHTML(trackingCode)}</code>\nخریدار: <code>${order.userId}</code>\nمحصول: ${escapeHTML(order.giftName)}`);
-        return;
-    }
-
-    // 2. رد سفارش
-    if (action.startsWith('order_reject_')) {
-        const trackingCode = action.replace('order_reject_', '');
-        const order = db.orders[trackingCode];
-        if (!order || order.status !== 'pending') {
-            await safeAnswer(callbackQuery.id, { text: 'این سفارش معتبر نیست یا قبلاً بررسی شده.', show_alert: true });
-            return;
-        }
-
-        adminData.waitingForOrderRejectReason = true;
-        adminData.rejectOrderCode = trackingCode;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(fromId, `لطفاً دلیل رد سفارش با کد پیگیری <code>${escapeHTML(trackingCode)}</code> را ارسال کنید:`);
-        return;
-    }
-
-    // 3. تایید رسید پرداخت (همراه با ثبت خودکار سفارش معلق در صورت وجود)
-    if (action.startsWith('approve_receipt_')) {
-        const parts = action.replace('approve_receipt_', '').split('_');
-        const targetUserId = parts[0];
-        const amount = parseInt(parts[1]) || 0;
-        const receiptCode = parts[2];
-
-        if (receiptCode && db.processedReceipts[receiptCode]) {
-            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً پردازش شده است.', show_alert: true });
-            return;
-        }
-
-        if (receiptCode) db.processedReceipts[receiptCode] = 'approved';
-        const targetUser = getUserDataById(targetUserId);
-        targetUser.wallet += amount;
-
-        if (!db.approvedReceiptsHistory) db.approvedReceiptsHistory = [];
-        db.approvedReceiptsHistory.push({
-            userId: targetUserId,
-            amount: amount,
-            receiptCode: receiptCode,
-            time: getFormattedTime()
-        });
-
-        // بررسی اینکه آیا کاربر سفارش معلقی برای ثبت خودکار دارد یا خیر
-        let autoPlacedOrderInfo = null;
-        if (targetUser.pendingOrderToAutoPlace) {
-            const pOrder = targetUser.pendingOrderToAutoPlace;
-            let calculatedCost = 0;
-            let giftNameStr = '';
-            let countVal = 1;
-            let recipientVal = '';
-            let commentVal = 'ندارد';
-            let trackingPrefix = 'STR-';
-
-            if (pOrder.type === 'star') {
-                const unitP = targetUser.starPricePerUnit || await fetchStarsPrice();
-                calculatedCost = Math.round(unitP * pOrder.starCount);
-                giftNameStr = `استارز تلگرام (${pOrder.starCount} عدد)`;
-                countVal = pOrder.starCount;
-                recipientVal = pOrder.starRecipient;
-                trackingPrefix = 'STR-';
-            } else if (pOrder.type === 'gift') {
-                const tonTomanVal = await getBinanceTONPriceInToman();
-                const starziUsdPrice = pOrder.selectedGiftStars * STAR_USD;
-                const baseGiftToman = (starziUsdPrice / 5.5) * tonTomanVal;
-                calculatedCost = Math.round(baseGiftToman * 1.10);
-                giftNameStr = pOrder.selectedGiftName;
-                countVal = 1;
-                recipientVal = pOrder.recipientUsername;
-                commentVal = pOrder.commentText;
-                trackingPrefix = 'STZ-';
-            } else if (pOrder.type === 'gram') {
-                const freshGData = await fetchGramData();
-                calculatedCost = Math.round(pOrder.gramAmount * freshGData.finalPrice);
-                giftNameStr = `ارز گرام (${pOrder.gramAmount} GRAM)`;
-                countVal = pOrder.gramAmount;
-                recipientVal = pOrder.gramWalletAddress;
-                commentVal = pOrder.gramMemo;
-                trackingPrefix = 'GRAM-';
-            }
-
-            if (calculatedCost > 0 && targetUser.wallet >= calculatedCost) {
-                targetUser.wallet -= calculatedCost;
-                const trackingCode = trackingPrefix + Math.floor(10000 + Math.random() * 90000);
-                const now = getFormattedTime();
-
-                db.orders[trackingCode] = {
-                    userId: targetUserId,
-                    firstName: targetUser.firstName,
-                    giftName: giftNameStr,
-                    count: countVal,
-                    recipient: recipientVal,
-                    comment: commentVal,
-                    amount: calculatedCost,
-                    time: now,
-                    status: 'pending'
-                };
-
-                autoPlacedOrderInfo = { trackingCode, giftName: giftNameStr, amount: calculatedCost };
-                targetUser.pendingOrderToAutoPlace = null;
-
-                // ==========================================
-                // تغییرات اصلی اعمال شده در این بخش است
-                // آدرس ولت / آیدی دریافت‌کننده و کامنت به اعلان ادمین اضافه شد
-                // ==========================================
-                const adminOrderMsg =
-                    `<b>[ ثبت خودکار سفارش پس از واریز ]</b>\n\n` +
-                    `👤 نام کاربر: ${escapeHTML(targetUser.firstName)}\n` +
-                    `🆔 آیدی عددی: <code>${targetUserId}</code>\n` +
-                    `🏷️ کد پیگیری: <code>${trackingCode}</code>\n` +
-                    `📦 محصول: ${escapeHTML(giftNameStr)}\n` +
-                    `📫 آدرس ولت/دریافت‌کننده: <code>${escapeHTML(recipientVal)}</code>\n` +
-                    `💬 ممو/کامنت: ${escapeHTML(commentVal)}\n` +
-                    `💰 مبلغ کل: ${calculatedCost.toLocaleString()} تومان\n` +
-                    `⏰ زمان ثبت: ${now}`;
-
-                await notifyAdmins(adminOrderMsg, {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '✅ انجام شد', callback_data: `order_done_${trackingCode}` }, { text: '❌ رد شد', callback_data: `order_reject_${trackingCode}` }]
-                        ]
-                    }
-                });
-            }
-        }
-
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id, { text: '✅ رسید تایید شد و مبلغ به حساب کاربر واریز گردید.' });
-
-        // پیام تایید رسید و افزایش موجودی برای کاربر همراه با اطلاع‌رسانی ثبت خودکار سفارش
-        let userMsgText = 
-            `✅ <b>رسید پرداخت شما تایید شد!</b>\n\n` +
-            `🏷️ شماره رسید: <code>${escapeHTML(receiptCode)}</code>\n` +
-            `💰 مبلغ واریزشده: ${amount.toLocaleString()} تومان\n` +
-            `💳 <b>این مبلغ به حساب کاربری شما اضافه شد.</b>`;
-
-        if (autoPlacedOrderInfo) {
-            userMsgText += `\n\n🛒 <b>سفارش معلق شما به صورت خودکار ثبت شد!</b>\n` +
-                           `📦 محصول: ${escapeHTML(autoPlacedOrderInfo.giftName)}\n` +
-                           `🏷️ کد پیگیری: <code>${autoPlacedOrderInfo.trackingCode}</code>\n` +
-                           `مبلغ از موجودی شما کسر و برای بررسی به مدیریت ارسال شد.`;
-        }
-
-        await safeSendMessage(targetUserId, userMsgText);
-
-        await editAdminMessage(msg, `<b>[ رسید تایید شد ✓ ]</b>\n\nرسید: <code>${escapeHTML(receiptCode)}</code>\nمبلغ: ${amount.toLocaleString()} تومان\nکاربر: <code>${targetUserId}</code>${autoPlacedOrderInfo ? '\n<i>(سفارش معلق کاربر به طور خودکار ثبت شد)</i>' : ''}`);
-        return;
-    }
-
-    // 4. رد رسید پرداخت
-    if (action.startsWith('reject_receipt_')) {
-        const parts = action.replace('reject_receipt_', '').split('_');
-        const targetUserId = parts[0];
-        const receiptCode = parts[1];
-
-        if (receiptCode && db.processedReceipts[receiptCode]) {
-            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً پردازش شده است.', show_alert: true });
-            return;
-        }
-
-        adminData.waitingForReceiptRejectReason = true;
-        adminData.rejectTargetId = targetUserId;
-        adminData.rejectReceiptCode = receiptCode;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(fromId, `لطفاً دلیل رد رسید <code>${escapeHTML(receiptCode)}</code> برای کاربر <code>${targetUserId}</code> را ارسال کنید:`);
-        return;
-    }
-
-    // 5. پاسخ به کاربر
-    if (action.startsWith('reply_')) {
-        const targetUserId = action.replace('reply_', '');
-        adminData.adminReplyingTo = targetUserId;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(fromId, `لطفاً متن پاسخ خود را برای کاربر <code>${targetUserId}</code> ارسال کنید:`);
-        return;
-    }
-}
+        save
