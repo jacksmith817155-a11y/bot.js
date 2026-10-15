@@ -7,7 +7,7 @@
  * Optional env vars:
  *   PROFIT_PERCENT   - درصد سود روی قیمت بازار (پیش‌فرض 8)
  *   BITPIN_TICKER_URL- آدرس قیمت‌های عمومی بیت‌پین (پیش‌فرض در کد)
- *   BITPIN_IRT_UNIT  - واحد قیمت‌های IRT بیت‌پین: rial یا toman (پیش‌فرض rial)
+ *   BITPIN_IRT_UNIT  - واحد قیمت‌های IRT بیت‌پین: toman یا rial (پیش‌فرض toman)
  *   PORT             - پورت وب سرویس (Render خودش تنظیم می‌کند)
  * ============================================================================
  */
@@ -68,7 +68,7 @@ const TOKEN_LOOKS_VALID = /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(TOKEN);
 const PROFIT_PERCENT = Number(process.env.PROFIT_PERCENT || 8);
 const PRICE_MULTIPLIER = 1 + (PROFIT_PERCENT / 100);
 const BITPIN_TICKER_URL = (process.env.BITPIN_TICKER_URL || 'https://api.bitpin.ir/api/v1/mkt/tickers/').trim();
-const BITPIN_IRT_UNIT = (process.env.BITPIN_IRT_UNIT || 'rial').trim().toLowerCase();
+const BITPIN_IRT_UNIT = (process.env.BITPIN_IRT_UNIT || 'toman').trim().toLowerCase();
 
 const ADMIN_ID_USERNAME = '@shantiaNFT';
 const ADMIN_NUMERIC_ID = 8750484397;
@@ -701,12 +701,14 @@ function parseBitpinTickers(payload) {
     const findBy = (re) => list.find(it => re.test(tickerSymbol(it))) || null;
 
     const usdtIrt = findBy(/^USDT[_\-\/]?(IRT|IRR|TMN|TOMAN)$/);
-    const tonIrt = findBy(/^TON[_\-\/]?(IRT|IRR|TMN|TOMAN)$/);
-    const tonUsdt = findBy(/^TON[_\-\/]?USDT$/);
+    // روی بیت‌پین، تون با نماد GRAM نمایش داده می‌شود (مثلاً GRAM_IRT)
+    const tonIrt = findBy(/^(TON|GRAM)[_\-\/]?(IRT|IRR|TMN|TOMAN)$/);
+    const tonUsdt = findBy(/^(TON|GRAM)[_\-\/]?USDT$/);
+    const sampleSymbols = list.slice(0, 15).map(tickerSymbol).join(', ');
 
     let usdtToman = usdtIrt ? irtToToman(tickerPrice(usdtIrt)) : 0;
     usdtToman = Math.round(usdtToman);
-    if (usdtToman <= 0) throw new Error('USDT/IRT price not found in Bitpin tickers');
+    if (usdtToman <= 0) throw new Error(`USDT price not found. symbols: ${sampleSymbols}`);
 
     let tonToman = 0;
     if (tonIrt) {
@@ -715,7 +717,7 @@ function parseBitpinTickers(payload) {
         tonToman = tickerPrice(tonUsdt) * usdtToman;
     }
     tonToman = Math.round(tonToman);
-    if (tonToman <= 0) throw new Error('TON price not found in Bitpin tickers');
+    if (tonToman <= 0) throw new Error(`TON/GRAM price not found. symbols: ${sampleSymbols}`);
 
     return { usdtToman, tonToman, time: Date.now() };
 }
@@ -2474,127 +2476,4 @@ async function handleCallback(callbackQuery) {
             return;
         }
         if (order.status !== 'pending') {
-            await safeAnswer(callbackQuery.id, { text: 'این سفارش قبلاً بررسی شده است.', show_alert: true });
-            await editAdminMessage(msg, `<b>[ این سفارش قبلاً بررسی شده ]</b>\n\nکد: <code>${escapeHTML(trackingCode)}</code>`);
-            return;
-        }
-
-        order.status = 'completed';
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id, { text: '✅ سفارش با موفقیت تایید و تکمیل شد.' });
-        await editAdminMessage(msg, `<b>[ ✅ سفارش تکمیل شد ]</b>\n\nکد پیگیری: <code>${escapeHTML(trackingCode)}</code>\nمشتری: ${escapeHTML(order.firstName)}\nمبلغ: ${order.amount.toLocaleString()} تومان`);
-        await safeSendMessage(order.userId, `🎉 <b>سفارش شما با کد پیگیری <code>${escapeHTML(trackingCode)}</code> با موفقیت انجام شد!</b>\n\nبا تشکر از خرید شما از نوا شاپ ❤️`);
-        await sendChannelReport(order);
-        return;
-    }
-
-    // 2. رد سفارش
-    if (action.startsWith('order_reject_')) {
-        const trackingCode = action.replace('order_reject_', '');
-        const order = db.orders[trackingCode];
-        if (!order) {
-            await safeAnswer(callbackQuery.id, { text: 'سفارش پیدا نشد.', show_alert: true });
-            return;
-        }
-        if (order.status !== 'pending') {
-            await safeAnswer(callbackQuery.id, { text: 'این سفارش قبلاً بررسی شده است.', show_alert: true });
-            return;
-        }
-
-        adminData.waitingForOrderRejectReason = true;
-        adminData.rejectOrderCode = trackingCode;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(chatId, `لطفاً دلیل رد سفارش با کد <code>${escapeHTML(trackingCode)}</code> را ارسال کنید:`, getBackKeyboard());
-        return;
-    }
-
-    // 3. تایید رسید
-    if (action.startsWith('approve_receipt_')) {
-        const parts = action.replace('approve_receipt_', '').split('_');
-        const targetUserId = parts[0];
-        const amount = parseInt(parts[1]);
-        const receiptCode = parts[2];
-
-        if (db.processedReceipts[receiptCode]) {
-            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً بررسی شده است.', show_alert: true });
-            return;
-        }
-        db.processedReceipts[receiptCode] = 'approved';
-        if (!db.approvedReceiptsHistory) db.approvedReceiptsHistory = [];
-        db.approvedReceiptsHistory.push({ userId: targetUserId, amount, receiptCode, time: getFormattedTime() });
-        saveDatabase();
-
-        const targetUserObj = getUserDataById(targetUserId);
-        targetUserObj.wallet += amount;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id, { text: '✅ رسید تایید و موجودی کاربر شارژ شد.' });
-        await editAdminMessage(msg, `<b>[ ✅ رسید تایید شد ]</b>\n\nکد رسید: <code>${receiptCode}</code>\nمبلغ: ${amount.toLocaleString()} تومان\nتوسط ادمین تایید شد.`);
-        await safeSendMessage(targetUserId, `✅ <b>رسید پرداخت شما تایید شد!</b>\n\nمبلغ ${amount.toLocaleString()} تومان به موجودی کیف پول شما افزوده شد. 🎉`);
-
-        if (targetUserObj.pendingOrderToAutoPlace) {
-            const pending = targetUserObj.pendingOrderToAutoPlace;
-            targetUserObj.pendingOrderToAutoPlace = null;
-            saveDatabase();
-
-            if (pending.type === 'star') {
-                targetUserObj.starCount = pending.starCount;
-                targetUserObj.starRecipient = pending.starRecipient;
-                targetUserObj.currentShopState = 'star_invoice';
-                saveDatabase();
-                await showStarInvoice(targetUserId, targetUserObj);
-            } else if (pending.type === 'gift') {
-                targetUserObj.selectedGiftName = pending.selectedGiftName;
-                targetUserObj.selectedGiftStars = pending.selectedGiftStars;
-                targetUserObj.recipientUsername = pending.recipientUsername;
-                targetUserObj.commentText = pending.commentText;
-                targetUserObj.currentShopState = 'gift_invoice';
-                saveDatabase();
-                await showGiftInvoice(targetUserId, targetUserObj);
-            } else if (pending.type === 'gram') {
-                targetUserObj.gramAmount = pending.gramAmount;
-                targetUserObj.gramWalletAddress = pending.gramWalletAddress;
-                targetUserObj.gramMemo = pending.gramMemo;
-                targetUserObj.currentShopState = 'gram_invoice';
-                saveDatabase();
-                await showGramInvoice(targetUserId, targetUserObj);
-            }
-        }
-        return;
-    }
-
-    // 4. رد رسید
-    if (action.startsWith('reject_receipt_')) {
-        const parts = action.replace('reject_receipt_', '').split('_');
-        const targetUserId = parts[0];
-        const receiptCode = parts[1];
-
-        if (db.processedReceipts[receiptCode]) {
-            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً بررسی شده است.', show_alert: true });
-            return;
-        }
-
-        adminData.waitingForReceiptRejectReason = true;
-        adminData.rejectTargetId = targetUserId;
-        adminData.rejectReceiptCode = receiptCode;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(chatId, `لطفاً دلیل رد رسید <code>${receiptCode}</code> را برای کاربر ارسال کنید:`, getBackKeyboard());
-        return;
-    }
-
-    // 5. پاسخ به کاربر
-    if (action.startsWith('reply_')) {
-        const targetUserId = action.replace('reply_', '');
-        adminData.adminReplyingTo = targetUserId;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(chatId, `لطفاً پاسخ خود را برای کاربر <code>${targetUserId}</code> ارسال کنید:`, getBackKeyboard());
-        return;
-    }
-}
+            await safeAnswer(callback
