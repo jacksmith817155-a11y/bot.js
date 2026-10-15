@@ -2233,7 +2233,7 @@ async function handleMessage(msg) {
             reply_markup: {
                 keyboard: [
                     [{ text: '💳 پرداخت ریالی' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' }]
+                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
                 ],
                 resize_keyboard: true
             }
@@ -2277,7 +2277,7 @@ async function handleMessage(msg) {
                 keyboard: [
                     [{ text: '👤 پشتیبانی مستقیم' }, { text: '🤖 پشتیبانی هوشمند' }],
                     [{ text: '🎫 ارسال تیکت (غیرمستقیم)' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' }]
+                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
                 ],
                 resize_keyboard: true
             }
@@ -2475,4 +2475,126 @@ async function handleCallback(callbackQuery) {
         }
         if (order.status !== 'pending') {
             await safeAnswer(callbackQuery.id, { text: 'این سفارش قبلاً بررسی شده است.', show_alert: true });
-            await editAdminMessage(msg, `<b>[ این سفارش قبلاً بررسی شده ]</b>\n\nکد: <code>${escapeHTML(trac
+            await editAdminMessage(msg, `<b>[ این سفارش قبلاً بررسی شده ]</b>\n\nکد: <code>${escapeHTML(trackingCode)}</code>`);
+            return;
+        }
+
+        order.status = 'completed';
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id, { text: '✅ سفارش با موفقیت تایید و تکمیل شد.' });
+        await editAdminMessage(msg, `<b>[ ✅ سفارش تکمیل شد ]</b>\n\nکد پیگیری: <code>${escapeHTML(trackingCode)}</code>\nمشتری: ${escapeHTML(order.firstName)}\nمبلغ: ${order.amount.toLocaleString()} تومان`);
+        await safeSendMessage(order.userId, `🎉 <b>سفارش شما با کد پیگیری <code>${escapeHTML(trackingCode)}</code> با موفقیت انجام شد!</b>\n\nبا تشکر از خرید شما از نوا شاپ ❤️`);
+        await sendChannelReport(order);
+        return;
+    }
+
+    // 2. رد سفارش
+    if (action.startsWith('order_reject_')) {
+        const trackingCode = action.replace('order_reject_', '');
+        const order = db.orders[trackingCode];
+        if (!order) {
+            await safeAnswer(callbackQuery.id, { text: 'سفارش پیدا نشد.', show_alert: true });
+            return;
+        }
+        if (order.status !== 'pending') {
+            await safeAnswer(callbackQuery.id, { text: 'این سفارش قبلاً بررسی شده است.', show_alert: true });
+            return;
+        }
+
+        adminData.waitingForOrderRejectReason = true;
+        adminData.rejectOrderCode = trackingCode;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id);
+        await safeSendMessage(chatId, `لطفاً دلیل رد سفارش با کد <code>${escapeHTML(trackingCode)}</code> را ارسال کنید:`, getBackKeyboard());
+        return;
+    }
+
+    // 3. تایید رسید
+    if (action.startsWith('approve_receipt_')) {
+        const parts = action.replace('approve_receipt_', '').split('_');
+        const targetUserId = parts[0];
+        const amount = parseInt(parts[1]);
+        const receiptCode = parts[2];
+
+        if (db.processedReceipts[receiptCode]) {
+            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً بررسی شده است.', show_alert: true });
+            return;
+        }
+        db.processedReceipts[receiptCode] = 'approved';
+        if (!db.approvedReceiptsHistory) db.approvedReceiptsHistory = [];
+        db.approvedReceiptsHistory.push({ userId: targetUserId, amount, receiptCode, time: getFormattedTime() });
+        saveDatabase();
+
+        const targetUserObj = getUserDataById(targetUserId);
+        targetUserObj.wallet += amount;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id, { text: '✅ رسید تایید و موجودی کاربر شارژ شد.' });
+        await editAdminMessage(msg, `<b>[ ✅ رسید تایید شد ]</b>\n\nکد رسید: <code>${receiptCode}</code>\nمبلغ: ${amount.toLocaleString()} تومان\nتوسط ادمین تایید شد.`);
+        await safeSendMessage(targetUserId, `✅ <b>رسید پرداخت شما تایید شد!</b>\n\nمبلغ ${amount.toLocaleString()} تومان به موجودی کیف پول شما افزوده شد. 🎉`);
+
+        if (targetUserObj.pendingOrderToAutoPlace) {
+            const pending = targetUserObj.pendingOrderToAutoPlace;
+            targetUserObj.pendingOrderToAutoPlace = null;
+            saveDatabase();
+
+            if (pending.type === 'star') {
+                targetUserObj.starCount = pending.starCount;
+                targetUserObj.starRecipient = pending.starRecipient;
+                targetUserObj.currentShopState = 'star_invoice';
+                saveDatabase();
+                await showStarInvoice(targetUserId, targetUserObj);
+            } else if (pending.type === 'gift') {
+                targetUserObj.selectedGiftName = pending.selectedGiftName;
+                targetUserObj.selectedGiftStars = pending.selectedGiftStars;
+                targetUserObj.recipientUsername = pending.recipientUsername;
+                targetUserObj.commentText = pending.commentText;
+                targetUserObj.currentShopState = 'gift_invoice';
+                saveDatabase();
+                await showGiftInvoice(targetUserId, targetUserObj);
+            } else if (pending.type === 'gram') {
+                targetUserObj.gramAmount = pending.gramAmount;
+                targetUserObj.gramWalletAddress = pending.gramWalletAddress;
+                targetUserObj.gramMemo = pending.gramMemo;
+                targetUserObj.currentShopState = 'gram_invoice';
+                saveDatabase();
+                await showGramInvoice(targetUserId, targetUserObj);
+            }
+        }
+        return;
+    }
+
+    // 4. رد رسید
+    if (action.startsWith('reject_receipt_')) {
+        const parts = action.replace('reject_receipt_', '').split('_');
+        const targetUserId = parts[0];
+        const receiptCode = parts[1];
+
+        if (db.processedReceipts[receiptCode]) {
+            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً بررسی شده است.', show_alert: true });
+            return;
+        }
+
+        adminData.waitingForReceiptRejectReason = true;
+        adminData.rejectTargetId = targetUserId;
+        adminData.rejectReceiptCode = receiptCode;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id);
+        await safeSendMessage(chatId, `لطفاً دلیل رد رسید <code>${receiptCode}</code> را برای کاربر ارسال کنید:`, getBackKeyboard());
+        return;
+    }
+
+    // 5. پاسخ به کاربر
+    if (action.startsWith('reply_')) {
+        const targetUserId = action.replace('reply_', '');
+        adminData.adminReplyingTo = targetUserId;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id);
+        await safeSendMessage(chatId, `لطفاً پاسخ خود را برای کاربر <code>${targetUserId}</code> ارسال کنید:`, getBackKeyboard());
+        return;
+    }
+}
