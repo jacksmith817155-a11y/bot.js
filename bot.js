@@ -1,13 +1,14 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V4.7 (Auto prices from BrsApi, +8% margin, env secrets)
+ * Stars Plus TELEGRAM BOT - V4.8 (Prices from Bitpin public ticker, +8% margin)
  *
  * Required env vars:
- *   BOT_TOKEN      - توکن ربات
- *   BRSAPI_KEY     - کلید BrsApi (برای قیمت خودکار تتر و تون)
+ *   BOT_TOKEN        - توکن ربات
  * Optional env vars:
- *   PROFIT_PERCENT - درصد سود روی قیمت API (پیش‌فرض 8)
- *   PORT           - پورت وب سرویس (Render خودش تنظیم می‌کند)
+ *   PROFIT_PERCENT   - درصد سود روی قیمت بازار (پیش‌فرض 8)
+ *   BITPIN_TICKER_URL- آدرس قیمت‌های عمومی بیت‌پین (پیش‌فرض در کد)
+ *   BITPIN_IRT_UNIT  - واحد قیمت‌های IRT بیت‌پین: rial یا toman (پیش‌فرض rial)
+ *   PORT             - پورت وب سرویس (Render خودش تنظیم می‌کند)
  * ============================================================================
  */
 
@@ -64,9 +65,10 @@ server.listen(PORT, () => {
 // ============================================================================
 const TOKEN = (process.env.BOT_TOKEN || '').toString().trim().replace(/^["']|["']$/g, '');
 const TOKEN_LOOKS_VALID = /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(TOKEN);
-const BRSAPI_KEY = (process.env.BRSAPI_KEY || '').toString().trim();
 const PROFIT_PERCENT = Number(process.env.PROFIT_PERCENT || 8);
 const PRICE_MULTIPLIER = 1 + (PROFIT_PERCENT / 100);
+const BITPIN_TICKER_URL = (process.env.BITPIN_TICKER_URL || 'https://api.bitpin.ir/api/v1/mkt/tickers/').trim();
+const BITPIN_IRT_UNIT = (process.env.BITPIN_IRT_UNIT || 'rial').trim().toLowerCase();
 
 const ADMIN_ID_USERNAME = '@shantiaNFT';
 const ADMIN_NUMERIC_ID = 8750484397;
@@ -122,9 +124,6 @@ const TelegramBot = typeof TelegramModule === 'function'
 if (!TOKEN_LOOKS_VALID) {
     SystemLogger.error('Token', '❌ BOT_TOKEN در متغیرهای محیطی تنظیم نشده یا نامعتبر است!');
 }
-if (!BRSAPI_KEY) {
-    SystemLogger.error('Config', '⚠️ BRSAPI_KEY تنظیم نشده؛ قیمت خودکار کار نمی‌کند و خرید با قیمت لحظه‌ای انجام نمی‌شود.');
-}
 
 const bot = new TelegramBot(TOKEN, {
     polling: TOKEN_LOOKS_VALID ? {
@@ -134,6 +133,8 @@ const bot = new TelegramBot(TOKEN, {
     } : false,
     filepath: false
 });
+
+let BOT_USERNAME = '';
 
 let fatalPollingHandled = false;
 let lastPollingErrorLog = 0;
@@ -174,8 +175,6 @@ if (TOKEN_LOOKS_VALID) {
             .catch(() => {});
     } catch (e) {}
 }
-
-let BOT_USERNAME = '';
 
 function pickButtonStyle(label) {
     const t = String(label || '');
@@ -630,22 +629,17 @@ function consumeDiscount(userData) {
 }
 
 // ============================================================================
-// AUTOMATIC PRICES (BrsApi)
+// AUTOMATIC PRICES (Bitpin public ticker - no API key, no IP whitelist)
 // ----------------------------------------------------------------------------
-// تتر و تون از API گرفته می‌شوند. روی آن‌ها PROFIT_PERCENT (پیش‌فرض ۸٪) سود
-// اضافه می‌شود. قیمت استارز = 0.015 تتر × قیمت تتر (تومان) × (۱ + سود).
-// اگر API در دسترس نباشد، آخرین قیمت معتبر تا ۱۰ دقیقه استفاده می‌شود و بعد
-// از آن خرید متوقف می‌شود تا با قیمت قدیمی فروش انجام نشود.
+// تتر و تون از قیمت‌های عمومی بیت‌پین خوانده می‌شوند.
+// قیمت‌های IRT معمولاً به ریال هستند؛ با BITPIN_IRT_UNIT تنظیم می‌شود.
+// قیمت فروش = قیمت بازار × (1 + PROFIT_PERCENT/100)
+// قیمت هر استارز = 0.015 تتر × قیمت تتر (تومان) × (1 + سود)
+// اگر بیت‌پین در دسترس نباشد، آخرین قیمت تا ۱۰ دقیقه استفاده می‌شود.
 // ============================================================================
 const PRICE_CACHE_TTL_MS = 30 * 1000;
 const PRICE_MAX_STALE_MS = 10 * 60 * 1000;
-const BRSAPI_TIMEOUT_MS = 6000;
-
-const MARKET_MATCH = {
-    tether: { en: ['tether'], fa: ['تتر'] },
-    ton: { en: ['toncoin'], fa: ['تونکوین', 'تون'] },
-    usdc: { en: ['usd coin'], fa: ['یواسدیکوین'] }
-};
+const PRICE_FETCH_TIMEOUT_MS = 6000;
 
 class PriceUnavailableError extends Error {
     constructor() {
@@ -660,16 +654,23 @@ let priceInFlight = null;
 function fetchJson(url) {
     return new Promise((resolve, reject) => {
         const req = https.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 StarsPlusBot', 'Cache-Control': 'no-cache' }
+            headers: {
+                'User-Agent': 'Mozilla/5.0 StarsPlusBot',
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
         }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
-                try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    return reject(new Error(`Bitpin HTTP ${res.statusCode}`));
+                }
+                try { resolve(JSON.parse(data)); } catch (e) { reject(new Error('Bitpin response is not JSON')); }
             });
         });
         req.on('error', reject);
-        req.setTimeout(BRSAPI_TIMEOUT_MS, () => req.destroy(new Error('BrsApi timeout')));
+        req.setTimeout(PRICE_FETCH_TIMEOUT_MS, () => req.destroy(new Error('Bitpin timeout')));
     });
 }
 
@@ -678,42 +679,45 @@ function toNumber(v) {
     return isNaN(n) ? 0 : n;
 }
 
-function normalizeFa(s) {
-    return String(s || '').replace(/[\u200c\s]/g, '').trim();
+function tickerSymbol(item) {
+    return String(item.symbol || item.name || item.market || item.title || '').trim().toUpperCase();
 }
 
-function findMarketItem(list, matcher) {
-    return list.find(item => {
-        const en = String(item.name_en || '').trim().toLowerCase();
-        const fa = normalizeFa(item.name);
-        return matcher.en.includes(en) || matcher.fa.includes(fa);
-    }) || null;
+function tickerPrice(item) {
+    return toNumber(item.price ?? item.last_price ?? item.lastPrice ?? item.close ?? item.last);
 }
 
-function parseMarket(payload) {
+// تبدیل قیمت IRT به تومان
+function irtToToman(value) {
+    return BITPIN_IRT_UNIT === 'toman' ? value : value / 10;
+}
+
+function parseBitpinTickers(payload) {
     const list = Array.isArray(payload)
         ? payload
-        : ((payload && (payload.data || payload.result || payload.items)) || []);
-    if (!Array.isArray(list) || list.length === 0) throw new Error('BrsApi response is empty');
+        : ((payload && (payload.results || payload.data || payload.result || payload.tickers || payload.items)) || []);
+    if (!Array.isArray(list) || list.length === 0) throw new Error('Bitpin ticker list is empty');
 
-    const tether = findMarketItem(list, MARKET_MATCH.tether);
-    const ton = findMarketItem(list, MARKET_MATCH.ton);
-    const usdc = findMarketItem(list, MARKET_MATCH.usdc);
+    const findBy = (re) => list.find(it => re.test(tickerSymbol(it))) || null;
 
-    let usdtToman = tether ? toNumber(tether.price_toman) : 0;
-    if (usdtToman <= 0 && tether && usdc && toNumber(usdc.price) > 0 && toNumber(usdc.price_toman) > 0) {
-        usdtToman = toNumber(tether.price) * (toNumber(usdc.price_toman) / toNumber(usdc.price));
-    }
+    const usdtIrt = findBy(/^USDT[_\-\/]?(IRT|IRR|TMN|TOMAN)$/);
+    const tonIrt = findBy(/^TON[_\-\/]?(IRT|IRR|TMN|TOMAN)$/);
+    const tonUsdt = findBy(/^TON[_\-\/]?USDT$/);
+
+    let usdtToman = usdtIrt ? irtToToman(tickerPrice(usdtIrt)) : 0;
     usdtToman = Math.round(usdtToman);
-    if (usdtToman <= 0) throw new Error('Tether toman price not available');
+    if (usdtToman <= 0) throw new Error('USDT/IRT price not found in Bitpin tickers');
 
-    const tonUsd = ton ? toNumber(ton.price) : 0;
-    let tonToman = ton ? toNumber(ton.price_toman) : 0;
-    if (tonToman <= 0 && tonUsd > 0) tonToman = tonUsd * usdtToman;
+    let tonToman = 0;
+    if (tonIrt) {
+        tonToman = irtToToman(tickerPrice(tonIrt));
+    } else if (tonUsdt) {
+        tonToman = tickerPrice(tonUsdt) * usdtToman;
+    }
     tonToman = Math.round(tonToman);
-    if (tonToman <= 0) throw new Error('TON price not available');
+    if (tonToman <= 0) throw new Error('TON price not found in Bitpin tickers');
 
-    return { usdtToman, tonToman, tonUsd, time: Date.now() };
+    return { usdtToman, tonToman, time: Date.now() };
 }
 
 async function getMarketPrices() {
@@ -724,14 +728,11 @@ async function getMarketPrices() {
 
     priceInFlight = (async () => {
         try {
-            if (!BRSAPI_KEY) throw new Error('BRSAPI_KEY تنظیم نشده است');
-            const fresh = parseMarket(await fetchJson(
-                `https://Api.BrsApi.ir/Market/Cryptocurrency.php?key=${encodeURIComponent(BRSAPI_KEY)}`
-            ));
+            const fresh = parseBitpinTickers(await fetchJson(BITPIN_TICKER_URL));
             priceCache = { data: fresh, time: Date.now() };
             return fresh;
         } catch (e) {
-            SystemLogger.error('Price', 'BrsApi fetch failed', e);
+            SystemLogger.error('Price', 'Bitpin price fetch failed', e);
             if (priceCache.data && Date.now() - priceCache.time < PRICE_MAX_STALE_MS) {
                 return priceCache.data;
             }
@@ -744,23 +745,27 @@ async function getMarketPrices() {
     return priceInFlight;
 }
 
+// قیمت یک تون برای مشتری (تومان) با سود
 async function getTonTomanPrice() {
     if (db.manualTonPrice && db.manualTonPrice > 0) return db.manualTonPrice;
     const m = await getMarketPrices();
     return Math.round(m.tonToman * PRICE_MULTIPLIER);
 }
 
+// قیمت یک استارز برای مشتری (تومان) با سود
 async function fetchStarsPrice() {
     if (db.manualStarPrice && db.manualStarPrice > 0) return db.manualStarPrice;
     const m = await getMarketPrices();
     return Math.round(STAR_USD * m.usdtToman * PRICE_MULTIPLIER);
 }
 
+// قیمت گرام/تون برای فاکتور و موجودی
 async function fetchGramData() {
     const finalPrice = await getTonTomanPrice();
     return { finalPrice };
 }
 
+// قیمت گیفت استارزی: تعداد استارز × قیمت هر استارز
 async function getGiftPriceToman(stars) {
     if (db.manualGiftBasePrice && db.manualGiftBasePrice > 0) {
         return Math.round((db.manualGiftBasePrice / 15) * stars);
@@ -1184,8 +1189,9 @@ async function handleMessage(msg) {
             const ton = await getTonTomanPrice();
             const star = await fetchStarsPrice();
             priceText =
-                `تتر (API): ${m.usdtToman.toLocaleString()} تومان\n` +
-                `تون (API): ${m.tonToman.toLocaleString()} تومان\n` +
+                `منبع: Bitpin (${escapeHTML(BITPIN_TICKER_URL)})\n` +
+                `تتر بازار: ${m.usdtToman.toLocaleString()} تومان\n` +
+                `تون بازار: ${m.tonToman.toLocaleString()} تومان\n` +
                 `قیمت فروش تون: ${ton.toLocaleString()} تومان\n` +
                 `قیمت فروش هر استارز: ${star.toLocaleString()} تومان\n` +
                 `سود: ${PROFIT_PERCENT}%`;
@@ -1637,6 +1643,7 @@ async function handleMessage(msg) {
         return;
     }
 
+    // ---------------- Smart Support (AI) Section ----------------
     if (userData.waitingForSmartSupport && text) {
         if (text === '🔙 بازگشت به منوی اصلی' || text === 'برگشت ↩️') {
             userData.waitingForSmartSupport = false;
@@ -1673,6 +1680,7 @@ async function handleMessage(msg) {
         return;
     }
 
+    // ---------------- Discount code input & live invoice edit ----------------
     if (userData.waitingForDiscountInput && text) {
         userData.waitingForDiscountInput = false;
         saveDatabase();
@@ -2033,7 +2041,7 @@ async function handleMessage(msg) {
         saveDatabase();
         const currentPriceText = db.manualTonPrice > 0
             ? `<b>${db.manualTonPrice.toLocaleString()} تومان (دستی)</b>`
-            : `<b>خودکار (API + ${PROFIT_PERCENT}%)</b>`;
+            : `<b>خودکار (Bitpin + ${PROFIT_PERCENT}%)</b>`;
         await safeSendMessage(chatId, `<b>[ تنظیم قیمت دستی تون ]</b>\n\nوضعیت فعلی: ${currentPriceText}\n\nلطفاً قیمت یک تون را به تومان وارد کنید (0 برای حالت خودکار):`, backKeyboard);
         return;
     }
@@ -2043,7 +2051,7 @@ async function handleMessage(msg) {
         saveDatabase();
         const currentPriceText = db.manualStarPrice > 0
             ? `<b>${db.manualStarPrice.toLocaleString()} تومان (دستی)</b>`
-            : `<b>خودکار (API + ${PROFIT_PERCENT}%)</b>`;
+            : `<b>خودکار (Bitpin + ${PROFIT_PERCENT}%)</b>`;
         await safeSendMessage(chatId, `<b>[ تنظیم قیمت دستی استارز ]</b>\n\nوضعیت فعلی: ${currentPriceText}\n\nلطفاً قیمت هر واحد استارز را وارد کنید (0 برای حالت خودکار):`, backKeyboard);
         return;
     }
@@ -2457,6 +2465,7 @@ async function handleCallback(callbackQuery) {
 
     const adminData = getUserDataById(fromId);
 
+    // 1. انجام سفارش
     if (action.startsWith('order_done_')) {
         const trackingCode = action.replace('order_done_', '');
         const order = db.orders[trackingCode];
@@ -2466,129 +2475,4 @@ async function handleCallback(callbackQuery) {
         }
         if (order.status !== 'pending') {
             await safeAnswer(callbackQuery.id, { text: 'این سفارش قبلاً بررسی شده است.', show_alert: true });
-            await editAdminMessage(msg, `<b>[ این سفارش قبلاً بررسی شده ]</b>\n\nکد: <code>${escapeHTML(trackingCode)}</code>`);
-            return;
-        }
-
-        order.status = 'completed';
-        order.completedAt = getFormattedTime();
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id, { text: '✅ سفارش تایید و تکمیل شد.' });
-        await editAdminMessage(msg, `<b>[ سفارش تکمیل شد ✅ ]</b>\n\nکد: <code>${escapeHTML(trackingCode)}</code>\nتوسط: ${escapeHTML(callbackQuery.from.first_name)}`);
-        await safeSendMessage(order.userId, `✅ سفارش شما با کد پیگیری <code>${escapeHTML(trackingCode)}</code> انجام شد و به اتمام رسید!`);
-        await sendChannelReport(order);
-        return;
-    }
-
-    if (action.startsWith('order_reject_')) {
-        const trackingCode = action.replace('order_reject_', '');
-        const order = db.orders[trackingCode];
-        if (!order) {
-            await safeAnswer(callbackQuery.id, { text: 'سفارش پیدا نشد.', show_alert: true });
-            return;
-        }
-        if (order.status !== 'pending') {
-            await safeAnswer(callbackQuery.id, { text: 'این سفارش قبلاً بررسی شده است.', show_alert: true });
-            return;
-        }
-
-        adminData.waitingForOrderRejectReason = true;
-        adminData.rejectOrderCode = trackingCode;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(chatId, `لطفاً دلیل رد سفارش با کد <code>${escapeHTML(trackingCode)}</code> را ارسال کنید:`);
-        return;
-    }
-
-    if (action.startsWith('approve_receipt_')) {
-        const parts = action.replace('approve_receipt_', '').split('_');
-        const targetUserId = parts[0];
-        const amount = parseInt(parts[1]);
-        const receiptCode = parts[2];
-
-        if (db.processedReceipts[receiptCode]) {
-            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً بررسی شده است.', show_alert: true });
-            await editAdminMessage(msg, `<b>[ این رسید قبلاً بررسی شده است ]</b>`);
-            return;
-        }
-
-        db.processedReceipts[receiptCode] = 'approved';
-        if (!db.approvedReceiptsHistory) db.approvedReceiptsHistory = [];
-        db.approvedReceiptsHistory.push({
-            userId: targetUserId,
-            amount: amount,
-            receiptCode: receiptCode,
-            time: getFormattedTime()
-        });
-
-        const targetUser = getUserDataById(targetUserId);
-        targetUser.wallet += amount;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id, { text: '✅ رسید تایید و موجودی شارژ شد.' });
-        await editAdminMessage(msg, `<b>[ رسید تایید شد ✅ ]</b>\n\nمبلغ: ${amount.toLocaleString()} تومان\nبه کاربر: <code>${targetUserId}</code>`);
-        await safeSendMessage(targetUserId, `✅ رسید پرداخت شما تایید شد و مبلغ ${amount.toLocaleString()} تومان به موجودی حساب شما واریز گردید! 🎉`);
-
-        if (targetUser.pendingOrderToAutoPlace) {
-            const po = targetUser.pendingOrderToAutoPlace;
-            targetUser.pendingOrderToAutoPlace = null;
-            saveDatabase();
-
-            if (po.type === 'star') {
-                targetUser.starCount = po.starCount;
-                targetUser.starRecipient = po.starRecipient;
-                targetUser.currentShopState = 'star_invoice';
-                saveDatabase();
-                await showStarInvoice(targetUserId, targetUser);
-            } else if (po.type === 'gift') {
-                targetUser.selectedGiftName = po.selectedGiftName;
-                targetUser.selectedGiftStars = po.selectedGiftStars;
-                targetUser.recipientUsername = po.recipientUsername;
-                targetUser.commentText = po.commentText;
-                targetUser.currentShopState = 'gift_invoice';
-                saveDatabase();
-                await showGiftInvoice(targetUserId, targetUser);
-            } else if (po.type === 'gram') {
-                targetUser.gramAmount = po.gramAmount;
-                targetUser.gramWalletAddress = po.gramWalletAddress;
-                targetUser.gramMemo = po.gramMemo;
-                targetUser.currentShopState = 'gram_invoice';
-                saveDatabase();
-                await showGramInvoice(targetUserId, targetUser);
-            }
-        }
-        return;
-    }
-
-    if (action.startsWith('reject_receipt_')) {
-        const parts = action.replace('reject_receipt_', '').split('_');
-        const targetUserId = parts[0];
-        const receiptCode = parts[1];
-
-        if (db.processedReceipts[receiptCode]) {
-            await safeAnswer(callbackQuery.id, { text: 'این رسید قبلاً بررسی شده است.', show_alert: true });
-            return;
-        }
-
-        adminData.waitingForReceiptRejectReason = true;
-        adminData.rejectTargetId = targetUserId;
-        adminData.rejectReceiptCode = receiptCode;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(chatId, `لطفاً دلیل رد رسید <code>${receiptCode}</code> را ارسال کنید:`);
-        return;
-    }
-
-    if (action.startsWith('reply_')) {
-        const targetUserId = action.replace('reply_', '');
-        adminData.adminReplyingTo = targetUserId;
-        saveDatabase();
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(chatId, `لطفاً پاسخ خود را برای کاربر <code>${targetUserId}</code> بفرستید:`);
-        return;
-    }
-}
+            await editAdminMessage(msg, `<b>[ این سفارش قبلاً بررسی شده ]</b>\n\nکد: <code>${escapeHTML(trac
