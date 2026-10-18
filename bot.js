@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V4.9 (Prices & Charts from Bitpin public ticker)
+ * Stars Plus TELEGRAM BOT - V5.0 (Prices & Charts from Bitpin public ticker)
  * ============================================================================
  */
 
@@ -703,7 +703,7 @@ function parseBitpinTickers(payload) {
 
     let usdtToman = usdtIrt ? irtToToman(tickerPrice(usdtIrt)) : 0;
     usdtToman = Math.round(usdtToman);
-    if (usdtToman <= 0) usdtToman = 60000; // fallback
+    if (usdtToman <= 0) usdtToman = 60000;
 
     let tonToman = 0;
     if (tonIrt) {
@@ -776,7 +776,7 @@ function getMainKeyboard(isAdmin) {
         [{ text: '🛒 خرید محصول' }],
         [{ text: '➕ افزایش موجودی' }, { text: '💳 حساب کاربری' }],
         [{ text: '📞 پشتیبانی' }, { text: '📦 پیگیری سفارش' }],
-        [{ text: '❤️ چطوری میتوانم به شما اعتماد کنم' }]
+        [{ text: '❤️ چه طور میتوانم به شما اعتماد کنم' }]
     ];
     if (isAdmin) rows.push([{ text: '🔧 پنل مدیریت' }]);
     return { reply_markup: { keyboard: rows, resize_keyboard: true, is_persistent: true } };
@@ -894,7 +894,7 @@ function starInvoiceKeyboard() {
             keyboard: [
                 [{ text: 'تأیید ✅' }, { text: 'لغو خرید ❌' }],
                 [{ text: 'اعمال تخفیف 🎁' }, { text: 'اعمال کد تخفیف 🎫' }],
-                [{ text: '🔙 بازگشت به پکیج‌ها' }, { text: '🏠 منوی اصلی' ]]
+                [{ text: '🔙 بازگشت به پکیج‌ها' }, { text: '🏠 منوی اصلی' }]
             ],
             resize_keyboard: true
         }
@@ -1097,21 +1097,17 @@ async function handleMessage(msg) {
     const accountKeyboard = getAccountKeyboard();
     const adminPanelMarkup = getAdminPanelKeyboard();
 
-    // بررسی دستورات استعلام قیمت یا تبدیل ارز برای گروه ها و چت خصوصی
     if (text) {
         const cleanText = text.trim();
         const lowerText = cleanText.toLowerCase();
 
-        // الگوی استعلام قیمت یا تبدیل (مثلا: "5 تتر تون" یا "تون" یا "تتر" یا "bitcoin")
         let tickersList = [];
         try {
             tickersList = await getAllBitpinTickers();
         } catch (e) {}
 
         if (tickersList.length > 0) {
-            // پیدا کردن کلمات کلیدی ارز در متن پیام کاربر
             let matchedTicker = null;
-            let querySymbol = '';
 
             for (const item of tickersList) {
                 const sym = tickerSymbol(item);
@@ -1121,12 +1117,10 @@ async function handleMessage(msg) {
 
                 if (lowerText.includes(sym.toLowerCase()) || lowerText.includes(base.toLowerCase()) || (nameFa && lowerText.includes(nameFa))) {
                     matchedTicker = item;
-                    querySymbol = sym;
                     break;
                 }
             }
 
-            // اگر ارزی پیدا شد یا عدد و ارزی با هم ارسال شد (مثلا 5 تتر تون یا 2 تون)
             if (matchedTicker || lowerText.startsWith('/price') || lowerText.startsWith('قیمت') || /^\d+(\.\d+)?\s+[a-zA-Zرالف-ی]+/.test(lowerText)) {
                 if (!matchedTicker) {
                     matchedTicker = tickersList.find(it => /USDT/.test(tickerSymbol(it))) || tickersList[0];
@@ -1138,7 +1132,6 @@ async function handleMessage(msg) {
                 const baseName = matchedTicker.base_asset?.symbol || matchedTicker.symbol || 'COIN';
                 const baseFa = matchedTicker.base_asset?.name_fa || baseName;
 
-                // استخراج عدد در صورت وجود (مثلاً "5 تون")
                 let multiplier = 1;
                 const matchNum = cleanText.match(/^(\d+(\.\d+)?)/);
                 if (matchNum) {
@@ -2649,7 +2642,6 @@ async function handleCallback(callbackQuery) {
 
         await safeAnswer(callbackQuery.id, { text: targetUObj.isBanned ? 'کاربر بن شد.' : 'کاربر آنبن شد.', show_alert: true });
 
-        // Refresh detail view
         let detailsText = `<b>👤 جزئیات کاربر:</b> <code>${targetUId}</code>\n\n`;
         detailsText += `نام: ${escapeHTML(targetUObj.firstName)}\n`;
         detailsText += `موجودی اصلی: ${targetUObj.wallet.toLocaleString()} تومان\n`;
