@@ -1986,26 +1986,28 @@ async function handleMessage(msg) {
     }
 
     if (isAdmin && isBtn(text, BTN.ACTIVITY)) {
-        let actMsg = `<b>📊 بخش فعالیت‌های پنل مدیریت</b>\n\n`;
-        actMsg += `<b>✔️ رسیدهای تایید شده:</b>\n`;
-        if (db.approvedReceiptsHistory && db.approvedReceiptsHistory.length > 0) {
-            db.approvedReceiptsHistory.slice(-10).forEach((rec, idx) => {
-                actMsg += `${idx + 1}. کاربر: <code>${rec.userId}</code> | مبلغ: ${Number(rec.amount).toLocaleString()} تومان | رسید: ${rec.receiptCode} | تاریخ: ${rec.time}\n`;
-            });
-        } else {
-            actMsg += `هنوز رسیدی تایید نشده است.\n`;
+        const uniqueUserIds = new Set();
+        Object.values(db.orders).forEach(o => uniqueUserIds.add(String(o.userId)));
+        if (db.approvedReceiptsHistory) {
+            db.approvedReceiptsHistory.forEach(r => uniqueUserIds.add(String(r.userId)));
+        }
+        Object.keys(db.users).forEach(uId => uniqueUserIds.add(String(uId)));
+
+        const inlineKeyboardRows = [];
+        for (const uId of uniqueUserIds) {
+            const uObj = getUserDataById(uId);
+            const statusEmoji = uObj.isBanned ? '🔴' : '🟢';
+            inlineKeyboardRows.push([
+                { text: `${statusEmoji} آیدی: ${uId} (${uObj.firstName})`, callback_data: `admin_user_detail_${uId}` }
+            ]);
         }
 
-        actMsg += `\n<b>🛍 تفکیک فاکتورها و سفارشات:</b>\n`;
-        const ordersList = Object.entries(db.orders);
-        if (ordersList.length > 0) {
-            ordersList.slice(-10).forEach(([code, ord], idx) => {
-                actMsg += `${idx + 1}. کد: <code>${code}</code> | محصول: ${escapeHTML(ord.giftName)} | مبلغ: ${ord.amount.toLocaleString()} تومان | وضعیت: ${ord.status}\n`;
-            });
-        } else {
-            actMsg += `سفارشی ثبت نشده است.\n`;
-        }
-        await safeSendMessage(chatId, actMsg, adminPanelMarkup);
+        const actMsg = `<b>📊 بخش مدیریت و فعالیت‌های کاربران</b>\n\nروی آیدی هر کاربر کلیک کنید تا جزئیات کامل فعالیت‌ها، موجودی و دکمه‌های مدیریتی نمایش داده شود:`;
+        await safeSendMessage(chatId, actMsg, {
+            reply_markup: {
+                inline_keyboard: inlineKeyboardRows.length > 0 ? inlineKeyboardRows : [[{ text: 'هیچ کاربری یافت نشد', callback_data: 'noop' }]]
+            }
+        });
         return;
     }
 
@@ -2204,7 +2206,7 @@ async function handleMessage(msg) {
         saveDatabase();
         await safeSendMessage(chatId, 'کامنت دلخواه خود را بفرستید:', backKeyboard);
     }
-    else if (text === '❤️ چطوری میتوانم به شما اعتماد کنم' || isBtn(text, '❤️ چطوری میتوانم به شما اعتماد کنم')) {
+    else if (text === '❤️ چه طور میتوانم به شما اعتماد کنم' || isBtn(text, '❤️ چطوری میتوانم به شما اعتماد کنم')) {
         await safeSendMessage(chatId, `نوا شاپ با رضایت هزاران مشتری فعال در خدمت شماست.\n\nکانال اعتماد:\n@nova1_shopp`, backKeyboard);
     }
     else if (text === '📦 پیگیری سفارش') {
@@ -2221,7 +2223,7 @@ async function handleMessage(msg) {
             reply_markup: {
                 keyboard: [
                     [{ text: '💳 پرداخت ریالی' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' }]
+                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
                 ],
                 resize_keyboard: true
             }
@@ -2369,6 +2371,166 @@ async function handleCallback(callbackQuery) {
             await safeAnswer(callbackQuery.id, { text: '❌ لطفاً ابتدا در کانال عضو شوید!', show_alert: true });
             return;
         }
+    }
+
+    if (isAdmin && action.startsWith('admin_user_detail_')) {
+        const targetUId = action.replace('admin_user_detail_', '');
+        const targetUObj = getUserDataById(targetUId);
+
+        let detailsText = `<b>👤 جزئیات کاربر:</b> <code>${targetUId}</code>\n\n`;
+        detailsText += `نام: ${escapeHTML(targetUObj.firstName)}\n`;
+        detailsText += `موجودی اصلی: ${targetUObj.wallet.toLocaleString()} تومان\n`;
+        detailsText += `موجودی تخفیف: ${(targetUObj.discountWallet || 0).toLocaleString()} تومان\n`;
+        detailsText += `وضعیت بن: ${targetUObj.isBanned ? '🔴 مسدود (بند)' : '🟢 فعال (آزاد)'}\n\n`;
+
+        detailsText += `<b>📦 آخرین فعالیت‌ها و سفارش‌ها:</b>\n`;
+        const userOrders = Object.entries(db.orders).filter(([code, ord]) => String(ord.userId) === String(targetUId));
+        if (userOrders.length > 0) {
+            userOrders.slice(-5).forEach(([code, ord], i) => {
+                detailsText += `${i + 1}. [${ord.time}] کد: ${code} | ${escapeHTML(ord.giftName)} | ${ord.amount.toLocaleString()} ت | ${ord.status}\n`;
+            });
+        } else {
+            detailsText += `سفارشی ثبت نشده است.\n`;
+        }
+
+        detailsText += `\n<b>💳 رسیدهای تایید شده این کاربر:</b>\n`;
+        const userReceipts = (db.approvedReceiptsHistory || []).filter(r => String(r.userId) === String(targetUId));
+        if (userReceipts.length > 0) {
+            userReceipts.slice(-5).forEach((rec, i) => {
+                detailsText += `${i + 1}. [${rec.time}] رسید: ${rec.receiptCode} | مبلغ: ${Number(rec.amount).toLocaleString()} ت\n`;
+            });
+        } else {
+            detailsText += `رسید تاییدیه‌ای ثبت نشده است.\n`;
+        }
+
+        const inlineKb = {
+            inline_keyboard: [
+                [
+                    { text: '➕ افزودن موجودی', callback_data: `adm_add_bal_${targetUId}` },
+                    { text: '➖ کسر موجودی', callback_data: `adm_sub_bal_${targetUId}` }
+                ],
+                [
+                    { text: targetUObj.isBanned ? '✅ آنبن کردن' : '🚫 بن کردن', callback_data: `adm_toggle_ban_${targetUId}` }
+                ],
+                [
+                    { text: '🔙 بازگشت به لیست کاربران', callback_data: 'adm_back_to_activity' }
+                ]
+            ]
+        };
+
+        try {
+            await bot.editMessageText(detailsText, {
+                chat_id: chatId,
+                message_id: msg.message_id,
+                parse_mode: 'HTML',
+                reply_markup: inlineKb
+            });
+        } catch (e) {
+            await safeSendMessage(chatId, detailsText, { reply_markup: inlineKb });
+        }
+        await safeAnswer(callbackQuery.id);
+        return;
+    }
+
+    if (isAdmin && action === 'adm_back_to_activity') {
+        const uniqueUserIds = new Set();
+        Object.values(db.orders).forEach(o => uniqueUserIds.add(String(o.userId)));
+        if (db.approvedReceiptsHistory) {
+            db.approvedReceiptsHistory.forEach(r => uniqueUserIds.add(String(r.userId)));
+        }
+        Object.keys(db.users).forEach(uId => uniqueUserIds.add(String(uId)));
+
+        const inlineKeyboardRows = [];
+        for (const uId of uniqueUserIds) {
+            const uObj = getUserDataById(uId);
+            const statusEmoji = uObj.isBanned ? '🔴' : '🟢';
+            inlineKeyboardRows.push([
+                { text: `${statusEmoji} آیدی: ${uId} (${uObj.firstName})`, callback_data: `admin_user_detail_${uId}` }
+            ]);
+        }
+
+        const actMsg = `<b>📊 بخش مدیریت و فعالیت‌های کاربران</b>\n\nروی آیدی هر کاربر کلیک کنید تا جزئیات کامل فعالیت‌ها، موجودی و دکمه‌های مدیریتی نمایش داده شود:`;
+        try {
+            await bot.editMessageText(actMsg, {
+                chat_id: chatId,
+                message_id: msg.message_id,
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: inlineKeyboardRows.length > 0 ? inlineKeyboardRows : [[{ text: 'هیچ کاربری یافت نشد', callback_data: 'noop' }]] }
+            });
+        } catch (e) {
+            await safeSendMessage(chatId, actMsg, {
+                reply_markup: { inline_keyboard: inlineKeyboardRows.length > 0 ? inlineKeyboardRows : [[{ text: 'هیچ کاربری یافت نشد', callback_data: 'noop' }]] }
+            });
+        }
+        await safeAnswer(callbackQuery.id);
+        return;
+    }
+
+    if (isAdmin && action.startsWith('adm_add_bal_')) {
+        const targetUId = action.replace('adm_add_bal_', '');
+        const adminData = getUserDataById(fromId);
+        adminData.adminAction = 'ADD';
+        adminData.targetUserId = targetUId;
+        adminData.waitingForAdminAmount = true;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id);
+        await safeSendMessage(chatId, `مبلغ افزایشی (تومان) برای کاربر <code>${targetUId}</code> را ارسال کنید:`, getBackKeyboard());
+        return;
+    }
+
+    if (isAdmin && action.startsWith('adm_sub_bal_')) {
+        const targetUId = action.replace('adm_sub_bal_', '');
+        const adminData = getUserDataById(fromId);
+        adminData.adminAction = 'SUB';
+        adminData.targetUserId = targetUId;
+        adminData.waitingForAdminAmount = true;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id);
+        await safeSendMessage(chatId, `مبلغ کاهشی (تومان) برای کاربر <code>${targetUId}</code> را ارسال کنید:`, getBackKeyboard());
+        return;
+    }
+
+    if (isAdmin && action.startsWith('adm_toggle_ban_')) {
+        const targetUId = action.replace('adm_toggle_ban_', '');
+        const targetUObj = getUserDataById(targetUId);
+        targetUObj.isBanned = !targetUObj.isBanned;
+        saveDatabase();
+
+        await safeAnswer(callbackQuery.id, { text: targetUObj.isBanned ? 'کاربر بن شد.' : 'کاربر آنبن شد.', show_alert: true });
+
+        // Refresh detail view
+        let detailsText = `<b>👤 جزئیات کاربر:</b> <code>${targetUId}</code>\n\n`;
+        detailsText += `نام: ${escapeHTML(targetUObj.firstName)}\n`;
+        detailsText += `موجودی اصلی: ${targetUObj.wallet.toLocaleString()} تومان\n`;
+        detailsText += `موجودی تخفیف: ${(targetUObj.discountWallet || 0).toLocaleString()} تومان\n`;
+        detailsText += `وضعیت بن: ${targetUObj.isBanned ? '🔴 مسدود (بند)' : '🟢 فعال (آزاد)'}\n\n`;
+
+        const inlineKb = {
+            inline_keyboard: [
+                [
+                    { text: '➕ افزودن موجودی', callback_data: `adm_add_bal_${targetUId}` },
+                    { text: '➖ کسر موجودی', callback_data: `adm_sub_bal_${targetUId}` }
+                ],
+                [
+                    { text: targetUObj.isBanned ? '✅ آنبن کردن' : '🚫 بن کردن', callback_data: `adm_toggle_ban_${targetUId}` }
+                ],
+                [
+                    { text: '🔙 بازگشت به لیست کاربران', callback_data: 'adm_back_to_activity' }
+                ]
+            ]
+        };
+
+        try {
+            await bot.editMessageText(detailsText, {
+                chat_id: chatId,
+                message_id: msg.message_id,
+                parse_mode: 'HTML',
+                reply_markup: inlineKb
+            });
+        } catch (e) {}
+        return;
     }
 
     if (action.startsWith('add_balance_')) {
