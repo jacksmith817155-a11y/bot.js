@@ -2223,7 +2223,7 @@ async function handleMessage(msg) {
             reply_markup: {
                 keyboard: [
                     [{ text: '💳 پرداخت ریالی' }],
-                    [{ text: '🔙 بازگشت به منوی اصلی' ]]
+                    [{ text: '🔙 بازگشت به منوی اصلی' }]
                 ],
                 resize_keyboard: true
             }
