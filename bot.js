@@ -1,6 +1,14 @@
 /**
  * ============================================================================
- * Stars Plus TELEGRAM BOT - V5.0 (Prices & Charts from Bitpin public ticker)
+ * Stars Plus TELEGRAM BOT - V4.8 (Prices from Bitpin public ticker, +8% margin)
+ *
+ * Required env vars:
+ *   BOT_TOKEN        - توکن ربات
+ * Optional env vars:
+ *   PROFIT_PERCENT   - درصد سود روی قیمت بازار (پیش‌فرض 8)
+ *   BITPIN_TICKER_URL- آدرس قیمت‌های عمومی بیت‌پین (پیش‌فرض در کد)
+ *   BITPIN_IRT_UNIT  - واحد قیمت‌های IRT بیت‌پین: toman یا rial (پیش‌فرض toman)
+ *   PORT             - پورت وب سرویس (Render خودش تنظیم می‌کند)
  * ============================================================================
  */
 
@@ -73,6 +81,7 @@ const REPORT_CHANNEL = '@nova1_shopp';
 const CARD_NUMBER = '6219861452862914';
 const CARD_OWNER = 'شنتیا زاهد پور';
 
+// قیمت هر استارز به دلار (تتر)
 const STAR_USD = 0.015;
 
 // ============================================================================
@@ -676,18 +685,6 @@ function irtToToman(value) {
     return BITPIN_IRT_UNIT === 'toman' ? value : value / 10;
 }
 
-async function getAllBitpinTickers() {
-    try {
-        const payload = await fetchJson(BITPIN_TICKER_URL);
-        const list = Array.isArray(payload)
-            ? payload
-            : ((payload && (payload.results || payload.data || payload.result || payload.tickers || payload.items)) || []);
-        return list;
-    } catch (e) {
-        return [];
-    }
-}
-
 function parseBitpinTickers(payload) {
     const list = Array.isArray(payload)
         ? payload
@@ -703,7 +700,7 @@ function parseBitpinTickers(payload) {
 
     let usdtToman = usdtIrt ? irtToToman(tickerPrice(usdtIrt)) : 0;
     usdtToman = Math.round(usdtToman);
-    if (usdtToman <= 0) usdtToman = 60000;
+    if (usdtToman <= 0) throw new Error(`USDT price not found. symbols: ${sampleSymbols}`);
 
     let tonToman = 0;
     if (tonIrt) {
@@ -712,9 +709,9 @@ function parseBitpinTickers(payload) {
         tonToman = tickerPrice(tonUsdt) * usdtToman;
     }
     tonToman = Math.round(tonToman);
-    if (tonToman <= 0) tonToman = 350000;
+    if (tonToman <= 0) throw new Error(`TON/GRAM price not found. symbols: ${sampleSymbols}`);
 
-    return { usdtToman, tonToman, list, time: Date.now() };
+    return { usdtToman, tonToman, time: Date.now() };
 }
 
 async function getMarketPrices() {
@@ -725,8 +722,7 @@ async function getMarketPrices() {
 
     priceInFlight = (async () => {
         try {
-            const raw = await fetchJson(BITPIN_TICKER_URL);
-            const fresh = parseBitpinTickers(raw);
+            const fresh = parseBitpinTickers(await fetchJson(BITPIN_TICKER_URL));
             priceCache = { data: fresh, time: Date.now() };
             return fresh;
         } catch (e) {
@@ -776,7 +772,7 @@ function getMainKeyboard(isAdmin) {
         [{ text: '🛒 خرید محصول' }],
         [{ text: '➕ افزایش موجودی' }, { text: '💳 حساب کاربری' }],
         [{ text: '📞 پشتیبانی' }, { text: '📦 پیگیری سفارش' }],
-        [{ text: '❤️ چه طور میتوانم به شما اعتماد کنم' }]
+        [{ text: '❤️ چطوری میتوانم به شما اعتماد کنم' }]
     ];
     if (isAdmin) rows.push([{ text: '🔧 پنل مدیریت' }]);
     return { reply_markup: { keyboard: rows, resize_keyboard: true, is_persistent: true } };
@@ -827,17 +823,6 @@ function getAdminPanelKeyboard() {
             ],
             resize_keyboard: true
         }
-    };
-}
-
-function getGroupProductInlineKeyboard() {
-    return {
-        inline_keyboard: [
-            [
-                { text: '🛒 Add To Group', url: BOT_USERNAME ? `https://t.me/${BOT_USERNAME}?startgroup=true` : 'https://t.me/nova1_shopp' },
-                { text: '💎 مارکت ایرانی', callback_data: 'group_market_menu' }
-            ]
-        ]
     };
 }
 
@@ -1096,67 +1081,6 @@ async function handleMessage(msg) {
     const backKeyboard = getBackKeyboard();
     const accountKeyboard = getAccountKeyboard();
     const adminPanelMarkup = getAdminPanelKeyboard();
-
-    if (text) {
-        const cleanText = text.trim();
-        const lowerText = cleanText.toLowerCase();
-
-        let tickersList = [];
-        try {
-            tickersList = await getAllBitpinTickers();
-        } catch (e) {}
-
-        if (tickersList.length > 0) {
-            let matchedTicker = null;
-
-            for (const item of tickersList) {
-                const sym = tickerSymbol(item);
-                const base = String(item.base_asset?.symbol || '').toUpperCase();
-                const quote = String(item.quote_asset?.symbol || '').toUpperCase();
-                const nameFa = String(item.base_asset?.name_fa || '').toLowerCase();
-
-                if (lowerText.includes(sym.toLowerCase()) || lowerText.includes(base.toLowerCase()) || (nameFa && lowerText.includes(nameFa))) {
-                    matchedTicker = item;
-                    break;
-                }
-            }
-
-            if (matchedTicker || lowerText.startsWith('/price') || lowerText.startsWith('قیمت') || /^\d+(\.\d+)?\s+[a-zA-Zرالف-ی]+/.test(lowerText)) {
-                if (!matchedTicker) {
-                    matchedTicker = tickersList.find(it => /USDT/.test(tickerSymbol(it))) || tickersList[0];
-                }
-
-                const priceToman = irtToToman(tickerPrice(matchedTicker));
-                const priceUsdt = matchedTicker.price_info?.usdt_price || (matchedTicker.price / 60000) || 1;
-                const change24h = matchedTicker.price_info?.change_24h || matchedTicker.change_24h || 0;
-                const baseName = matchedTicker.base_asset?.symbol || matchedTicker.symbol || 'COIN';
-                const baseFa = matchedTicker.base_asset?.name_fa || baseName;
-
-                let multiplier = 1;
-                const matchNum = cleanText.match(/^(\d+(\.\d+)?)/);
-                if (matchNum) {
-                    multiplier = parseFloat(matchNum[1]);
-                }
-
-                const finalToman = Math.round(priceToman * multiplier);
-                const finalUsdt = (priceUsdt * multiplier).toFixed(2);
-
-                const tableText =
-                    `<b>GTStar / MARKETS</b>\n\n` +
-                    `🔵 <b>${multiplier} ${baseName} (${baseFa})</b>\n\n` +
-                    `💰 <b>تومان (IRT):</b> ${finalToman.toLocaleString()}\n` +
-                    `💵 <b>تتر (USDT):</b> $${finalUsdt}\n` +
-                    `📈 <b>تغییرات 24 ساعته:</b> ${change24h}%\n\n` +
-                    `🗓 ${getFormattedTime()}\n` +
-                    `🐺 @nova1_shopp`;
-
-                await safeSendMessage(chatId, tableText, {
-                    reply_markup: getGroupProductInlineKeyboard().reply_markup
-                });
-                return;
-            }
-        }
-    }
 
     if (text && text.startsWith('/start')) {
         resetUserWaiting(userData);
@@ -2418,72 +2342,6 @@ async function handleCallback(callbackQuery) {
     const userData = getUserDataById(fromId);
     const isAdmin = isUserAdmin(fromId);
 
-    if (action === 'group_market_menu') {
-        let tickersList = [];
-        try {
-            tickersList = await getAllBitpinTickers();
-        } catch (e) {}
-
-        const kbRows = [];
-        const popular = tickersList.slice(0, 8);
-        for (let i = 0; i < popular.length; i += 2) {
-            const row = [];
-            row.push({ text: `📊 ${tickerSymbol(popular[i])}`, callback_data: `market_coin_${tickerSymbol(popular[i])}` });
-            if (popular[i+1]) {
-                row.push({ text: `📊 ${tickerSymbol(popular[i+1])}`, callback_data: `market_coin_${tickerSymbol(popular[i+1])}` });
-            }
-            kbRows.push(row);
-        }
-        kbRows.push([{ text: '🔙 بستن منو', callback_data: 'group_market_close' }]);
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(chatId, `<b>🌐 مارکت ایرانی | انتخاب ارز:</b>\n\nلطفاً ارز مورد نظر خود را برای مشاهده قیمت و نمودار انتخاب کنید:`, {
-            reply_markup: { inline_keyboard: kbRows }
-        });
-        return;
-    }
-
-    if (action === 'group_market_close') {
-        await safeAnswer(callbackQuery.id);
-        try { await bot.deleteMessage(chatId, msg.message_id); } catch (e) {}
-        return;
-    }
-
-    if (action.startsWith('market_coin_')) {
-        const symbol = action.replace('market_coin_', '');
-        let tickersList = [];
-        try {
-            tickersList = await getAllBitpinTickers();
-        } catch (e) {}
-
-        const coin = tickersList.find(it => tickerSymbol(it) === symbol) || tickersList[0];
-        if (!coin) {
-            await safeAnswer(callbackQuery.id, { text: 'اطلاعات ارز یافت نشد.', show_alert: true });
-            return;
-        }
-
-        const priceToman = irtToToman(tickerPrice(coin));
-        const priceUsdt = coin.price_info?.usdt_price || (coin.price / 60000) || 1;
-        const change24h = coin.price_info?.change_24h || coin.change_24h || 0;
-        const baseName = coin.base_asset?.symbol || coin.symbol || 'COIN';
-        const baseFa = coin.base_asset?.name_fa || baseName;
-
-        const tableText =
-            `<b>GTStar / MARKETS</b>\n\n` +
-            `🔵 <b>1 ${baseName} (${baseFa})</b>\n\n` +
-            `💰 <b>تومان (IRT):</b> ${Math.round(priceToman).toLocaleString()}\n` +
-            `💵 <b>تتر (USDT):</b> $${Number(priceUsdt).toFixed(2)}\n` +
-            `📈 <b>تغییرات 24 ساعته:</b> ${change24h}%\n\n` +
-            `🗓 ${getFormattedTime()}\n` +
-            `🐺 @nova1_shopp`;
-
-        await safeAnswer(callbackQuery.id);
-        await safeSendMessage(chatId, tableText, {
-            reply_markup: getGroupProductInlineKeyboard().reply_markup
-        });
-        return;
-    }
-
     if (action === 'copy_card') {
         await safeAnswer(callbackQuery.id, { text: `شماره کارت کپی شد:\n${CARD_NUMBER}`, show_alert: true });
         return;
@@ -2642,6 +2500,7 @@ async function handleCallback(callbackQuery) {
 
         await safeAnswer(callbackQuery.id, { text: targetUObj.isBanned ? 'کاربر بن شد.' : 'کاربر آنبن شد.', show_alert: true });
 
+        // Refresh detail view
         let detailsText = `<b>👤 جزئیات کاربر:</b> <code>${targetUId}</code>\n\n`;
         detailsText += `نام: ${escapeHTML(targetUObj.firstName)}\n`;
         detailsText += `موجودی اصلی: ${targetUObj.wallet.toLocaleString()} تومان\n`;
