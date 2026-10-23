@@ -231,7 +231,8 @@ let db = {
     secondaryAdmin: null,
     manualTonPrice: 0,
     manualStarPrice: 0,
-    manualGiftBasePrice: 0
+    manualGiftBasePrice: 0,
+    lastMarketPrices: { usdtToman: 90000, tonToman: 300000 }
 };
 
 function getUserDataTemplate() {
@@ -329,6 +330,7 @@ function loadDatabase() {
             if (typeof loadedDb.manualTonPrice !== 'undefined') db.manualTonPrice = loadedDb.manualTonPrice;
             if (typeof loadedDb.manualStarPrice !== 'undefined') db.manualStarPrice = loadedDb.manualStarPrice;
             if (typeof loadedDb.manualGiftBasePrice !== 'undefined') db.manualGiftBasePrice = loadedDb.manualGiftBasePrice;
+            if (loadedDb.lastMarketPrices) db.lastMarketPrices = loadedDb.lastMarketPrices;
 
             (db.approvedReceiptsHistory || []).forEach(r => {
                 if (r.receiptCode) db.processedReceipts[r.receiptCode] = 'approved';
@@ -632,8 +634,8 @@ function consumeDiscount(userData) {
 // AUTOMATIC PRICES (Bitpin public ticker - no API key, no IP whitelist)
 // ============================================================================
 const PRICE_CACHE_TTL_MS = 30 * 1000;
-const PRICE_MAX_STALE_MS = 10 * 60 * 1000;
-const PRICE_FETCH_TIMEOUT_MS = 6000;
+const PRICE_MAX_STALE_MS = 24 * 60 * 60 * 1000;
+const PRICE_FETCH_TIMEOUT_MS = 8000;
 
 class PriceUnavailableError extends Error {
     constructor() {
@@ -649,7 +651,7 @@ function fetchJson(url) {
     return new Promise((resolve, reject) => {
         const req = https.get(url, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 StarsPlusBot',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'application/json',
                 'Cache-Control': 'no-cache'
             }
@@ -674,11 +676,11 @@ function toNumber(v) {
 }
 
 function tickerSymbol(item) {
-    return String(item.symbol || item.name || item.market || item.title || '').trim().toUpperCase();
+    return String(item.symbol || item.name || item.market || item.title || item.code || '').trim().toUpperCase();
 }
 
 function tickerPrice(item) {
-    return toNumber(item.price ?? item.last_price ?? item.lastPrice ?? item.close ?? item.last);
+    return toNumber(item.price ?? item.last_price ?? item.lastPrice ?? item.close ?? item.last ?? (item.price_info && item.price_info.price));
 }
 
 function irtToToman(value) {
@@ -686,30 +688,56 @@ function irtToToman(value) {
 }
 
 function parseBitpinTickers(payload) {
-    const list = Array.isArray(payload)
-        ? payload
-        : ((payload && (payload.results || payload.data || payload.result || payload.tickers || payload.items)) || []);
+    let list = [];
+    if (Array.isArray(payload)) {
+        list = payload;
+    } else if (payload && typeof payload === 'object') {
+        list = payload.results || payload.data || payload.result || payload.tickers || payload.items || [];
+        if (!Array.isArray(list) && typeof payload === 'object') {
+            list = Object.values(payload);
+        }
+    }
+
     if (!Array.isArray(list) || list.length === 0) throw new Error('Bitpin ticker list is empty');
 
-    const findBy = (re) => list.find(it => re.test(tickerSymbol(it))) || null;
-
-    const usdtIrt = findBy(/^USDT[_\-\/]?(IRT|IRR|TMN|TOMAN)$/);
-    const tonIrt = findBy(/^(TON|GRAM)[_\-\/]?(IRT|IRR|TMN|TOMAN)$/);
-    const tonUsdt = findBy(/^(TON|GRAM)[_\-\/]?USDT$/);
-    const sampleSymbols = list.slice(0, 15).map(tickerSymbol).join(', ');
-
-    let usdtToman = usdtIrt ? irtToToman(tickerPrice(usdtIrt)) : 0;
-    usdtToman = Math.round(usdtToman);
-    if (usdtToman <= 0) throw new Error(`USDT price not found. symbols: ${sampleSymbols}`);
-
+    let usdtToman = 0;
     let tonToman = 0;
-    if (tonIrt) {
-        tonToman = irtToToman(tickerPrice(tonIrt));
-    } else if (tonUsdt) {
-        tonToman = tickerPrice(tonUsdt) * usdtToman;
+
+    for (const item of list) {
+        const sym = tickerSymbol(item);
+        const p = tickerPrice(item);
+        if (!p) continue;
+
+        if (sym.includes('USDT') && (sym.includes('IRT') || sym.includes('TMN') || sym.includes('RIAN') || sym.includes('TOMAN') || sym.includes('IRR'))) {
+            usdtToman = irtToToman(p);
+        } else if ((sym.includes('TON') || sym.includes('GRAM')) && (sym.includes('IRT') || sym.includes('TMN') || sym.includes('TOMAN') || sym.includes('IRR'))) {
+            tonToman = irtToToman(p);
+        }
     }
-    tonToman = Math.round(tonToman);
-    if (tonToman <= 0) throw new Error(`TON/GRAM price not found. symbols: ${sampleSymbols}`);
+
+    if (usdtToman <= 0) {
+        const usdtItem = list.find(it => tickerSymbol(it) === 'USDT_IRT' || tickerSymbol(it) === 'USDTIRT');
+        if (usdtItem) usdtToman = irtToToman(tickerPrice(usdtItem));
+    }
+
+    if (tonToman <= 0) {
+        const tonItem = list.find(it => tickerSymbol(it) === 'TON_IRT' || tickerSymbol(it) === 'TONIRT');
+        if (tonItem) tonToman = irtToToman(tickerPrice(tonItem));
+    }
+
+    if (usdtToman <= 0 && db.lastMarketPrices && db.lastMarketPrices.usdtToman) {
+        usdtToman = db.lastMarketPrices.usdtToman;
+    }
+
+    if (tonToman <= 0 && db.lastMarketPrices && db.lastMarketPrices.tonToman) {
+        tonToman = db.lastMarketPrices.tonToman;
+    }
+
+    usdtToman = Math.round(usdtToman || 90000);
+    tonToman = Math.round(tonToman || 300000);
+
+    db.lastMarketPrices = { usdtToman, tonToman };
+    saveDatabase();
 
     return { usdtToman, tonToman, time: Date.now() };
 }
@@ -726,9 +754,15 @@ async function getMarketPrices() {
             priceCache = { data: fresh, time: Date.now() };
             return fresh;
         } catch (e) {
-            SystemLogger.error('Price', 'Bitpin price fetch failed', e);
-            if (priceCache.data && Date.now() - priceCache.time < PRICE_MAX_STALE_MS) {
-                return priceCache.data;
+            SystemLogger.error('Price', 'Bitpin price fetch failed, using fallback', e);
+            if (db.lastMarketPrices && db.lastMarketPrices.usdtToman) {
+                const fallback = {
+                    usdtToman: db.lastMarketPrices.usdtToman,
+                    tonToman: db.lastMarketPrices.tonToman,
+                    time: Date.now()
+                };
+                priceCache = { data: fallback, time: Date.now() };
+                return fallback;
             }
             throw new PriceUnavailableError();
         } finally {
@@ -1105,7 +1139,7 @@ async function handleMessage(msg) {
     }
 
     const backCommands = [
-        '🔙 بازگشت', 'برگشت ↩️', '🔙 برگشت', '🏠 منوی اصلی',
+        '🔙 بازگشت', 'برگشت ↩️', 'برگشت ↩', '🔙 برگشت', '🏠 منوی اصلی',
         'انصراف', '↶ برگشت', '🔙 بازگشت به منوی اصلی', '🔙 بازگشت به پکیج‌ها'
     ];
 
@@ -1139,7 +1173,7 @@ async function handleMessage(msg) {
 
             await safeSendPhoto(chatId, '1000002624.jpg', {
                 caption: starMsg,
-                reply_markup: { keyboard: [[{ text: 'محاسبه با موجودی من 🔄' }], [{ text: 'برگشت ↩' }]], resize_keyboard: true }
+                reply_markup: { keyboard: [[{ text: 'محاسبه با موجودی من 🔄' }], [{ text: 'برگشت ↩️' }]], resize_keyboard: true }
             });
             return;
         } else {
@@ -1634,7 +1668,7 @@ async function handleMessage(msg) {
     }
 
     if (userData.waitingForSmartSupport && text) {
-        if (text === '🔙 بازگشت به منوی اصلی' || text === 'برگشت ↩️') {
+        if (text === '🔙 بازگشت به منوی اصلی' || text === 'برگشت ↩️' || text === 'برگشت ↩') {
             userData.waitingForSmartSupport = false;
             saveDatabase();
             await safeSendMessage(chatId, 'به منوی اصلی برگشتید.', mainKeyboard);
@@ -2500,7 +2534,6 @@ async function handleCallback(callbackQuery) {
 
         await safeAnswer(callbackQuery.id, { text: targetUObj.isBanned ? 'کاربر بن شد.' : 'کاربر آنبن شد.', show_alert: true });
 
-        // Refresh detail view
         let detailsText = `<b>👤 جزئیات کاربر:</b> <code>${targetUId}</code>\n\n`;
         detailsText += `نام: ${escapeHTML(targetUObj.firstName)}\n`;
         detailsText += `موجودی اصلی: ${targetUObj.wallet.toLocaleString()} تومان\n`;
